@@ -1,0 +1,12 @@
+# dsh-review-dock bundle patch.
+#
+# This is the `dsh.bundle.patch` layer: when the package is listed in the
+# profile's `dsh.profile.bundles`, the loader merges this patch like any other
+# bundle layer, so the plugin mounts without hand-editing the profile.
+#
+# The row needs nothing of its own: the host half injects `tools` and resolves
+# the HTTP carrier through `ctx.inject(['connection'])`, so a composition without
+# Connection still mounts the plugin (it just cannot serve a surface).
+- insert:
+    - id: review-dock
+      name: dsh-review-dock

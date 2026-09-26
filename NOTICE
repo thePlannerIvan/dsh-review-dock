@@ -1,0 +1,22 @@
+DSH Review Dock
+Copyright (c) 2026 阿祖不看 TVC
+
+Author / maintainer: 阿祖不看 TVC
+Xiaohongshu: 阿祖不看 TVC
+Website: https://demyth.info
+Contact: Lawyif@163.com
+
+Canonical project name: DSH Review Dock
+Package identifier: dsh-review-dock
+Canonical repository: https://github.com/thePlannerIvan/dsh-review-dock
+
+This package is a DeepSeek Harness (DSH) client plugin. It is distributed
+together with the Planner skill family, whose review-surface contract it
+consumes:
+
+- review-surface contract: planners-review-core (02-skills-library/00-system)
+- first consumer: planners-ppt-hell
+
+Attribution may appear in repository documents, plugin UI, process HTML
+pages, review pages, validation pages and developer workflow surfaces.
+The plugin should not add project branding to final client deliverables.
