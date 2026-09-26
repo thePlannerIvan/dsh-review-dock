@@ -36,6 +36,13 @@
 - **桥的完整性闸门**：内联桥之前先核对它是否具备本宿主会用到的每一个方法（`connect`/`VERSION`/`asset`/`read`/`readText`/`write`/`wake`/`upload`/`on`），缺任何一个就明确拒绝并指名"哪一份、缺什么"，`review_open` 里也先跑一遍。绝不内联一份缺方法的桥。
 - **`watch` + `changedSeq`（变化戳）**：surface 可选声明一组**相对自身的**路径；宿主每 2 秒在 `/api/review.current` 上顺手 `stat` 它们，**只看 `mtime`/`size`、从不读内容**，元数据一变就步进 `changedSeq`。客户端**每次步进只往帧里推一条 `{ type: 'review/changed' }`**（无 payload），帧不重载、人写的东西不动。刻意不用 SSE：`dsh-client-hmr` 的 SSE 是裸路由，与本版的"零无鉴权路由"冲突。
 
+### `asset-upload` 真的能用了
+
+- **`POST /api/review.upload?surface=&rel=`**：桥交上来的字节（`{ rel, name, bytes }`，桥先做 `file.arrayBuffer()`）作为**原始请求体**中继到宿主并落盘，**不转 base64**。返回形状与无插件宿主一致（`{ok, path, sha256}`，另加 `bytes`）。
+- **能力双向钉住**：`HOST_CAPABILITIES` 加上 `asset-upload`（只在真的能做完之后加）；surface 不声明时，除了页面拿不到能力，**直接调这条路由也会 403** —— 能力是承诺，不是装饰。
+- **上限 16 MiB**：无插件宿主没有上限（只有连接层 300 MiB 兜底），这是**缺口不是范本**；字节要经过 postMessage 中继、在父页面与帧里各驻留一份，所以一次调用有界。超限回 413 并写明字节数。
+- **写路径的包含性校验比 `asset` 多两条**：拒绝写到现有的符号链接上；拒绝"最近的已存在祖先经 realpath 后落在 dir 之外"（否则 dir 内一个指向外部的软链目录就能把文件写到外面）。
+
 ### `watch` 的解析基准修对了，跳过也不再静默
 
 - **`watch` 按 surface 文件解析**（schema / 校验器 / 无插件宿主 / 本文件自己的注释都是这么定的），而不是按 `dir`。以前按 `dir` 解析，子目录里的面写 `"../timeline/timeline.json"` 就会指到 `dir` **之外**、被静默跳过 —— 面"打开成功"但**戳是哑的**。实测：修之前宿主 `stat` 的是 `<项目>/../timeline/timeline.json`（不存在，token 恒定）；修之后改真正那份文件，`changedSeq` 恰好步进一次。

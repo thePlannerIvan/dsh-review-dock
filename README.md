@@ -115,7 +115,13 @@ if (hasPromptRequest(agent, request.requestId)) return { accepted: true }   // �
 
 `init` 里的 `capabilities` 是**"这个面现在真正能用的"**，不是 surface 声明了什么，也不是宿主支持什么 —— 是两者的交集。**广告一个做不到的能力，等于让页面摆出一个必然失败的控件。**
 
-本宿主目前**一项都不广告**（`asset-upload` 的中转在，但实现侧会明确拒绝，所以它**不算**进交集）：surface 声明 `["asset-upload"]` → 页面拿到 `[]`；surface 声明 `[]` → `[]`。等上传真的做完，它才进这一列。
+本宿主目前**只有 `asset-upload`** 一项，而且它已经**真的能用**（`POST /api/review.upload` 落盘）：surface 声明 `["asset-upload"]` → 页面拿到 `["asset-upload"]`，上传控件亮起来；surface 不声明 → 页面拿到 `[]`，而且**即便绕过页面直接调那条路由也会被 403 拒掉**。广告一个做不到的能力等于让页面摆出一个必然失败的控件，所以这一列只放做完的事。
+
+**上传上限：16 MiB。** 无插件宿主没有上限（它只有连接层 300 MiB 兜底），那是**缺口而不是范本**：这些字节还要作为 postMessage 载荷穿过面板，父页面与帧里各驻留一份，所以一次调用该有个界。16 MiB 是一张 1920×1080 PNG 的好几倍。超限回 **413** 并在正文里写清"多少字节 > 上限"。
+
+**落盘位置**：`rel` 相对 **surface 的 `dir`**（与 `asset`/`read` 同一个基准），写入前做与 `asset` 同源的 realpath 包含性校验，并额外拒绝两条写操作特有的路径：**现有目标是符号链接**、以及**最近的已存在祖先经 realpath 后落在 `dir` 之外**（否则 `dir` 里一个指向外部的软链目录就能把新文件写到外面）。越界回 403。
+
+这个基准不是随便定的：反馈文件的消费者就是这么解析的 —— `planners-bypage/scripts/import-review-assets.mjs` 用 `resolve(dirname(feedbackPath), attachment.path)` 取上传文件，而反馈文件就在 `dir` 里。**页面写进去的路径、宿主落盘的位置、收件层读出来的位置，是同一个基准。**
 
 （无插件宿主 `serve-review.mjs` 回的是它**自己支持**的列表而不是交集 —— 同一个字段两种含义，这正是要写下来的原因。）
 
@@ -175,6 +181,7 @@ GET  /api/review.surface?surface=<abs json>   面的 meta：id / title / capabil
 GET  /api/review.page?surface=<abs json>      入口 HTML（桥已注入；缺注入点就拒绝）
 GET  /api/review.bridge                       桥的具名出处（页面并不直接取它）
 GET  /api/review.asset?surface=<abs json>&rel=  dir 树内的一个文件
+POST /api/review.upload?surface=<abs>&rel=   原始字节写进 dir 内的 rel（上限 16 MiB）
 POST /api/review.write                        {"surface","payload"} → 把 payload 原样写进 feedback 文件
 POST /api/review.wake                         {"surface","unit","sessionId"} → 递一句 prompt
 ```
@@ -256,6 +263,7 @@ ln -sfn /path/to/dsh-review-dock ~/.dsh/profiles/web/node_modules/dsh-review-doc
 - 相同 nonce、来自错误窗口的伪造消息被 `event.source === frame.contentWindow` 判掉；帧内合法调用照常落地；
 - `keepMounted: true` 让帧在切走标签页后依然存活（切回时桥的 nonce 不变）；
 - **通知不丢**：同一个会话里**两次不同的整套提交**（同一句话、不同 payload）→ 日志里出现**两条不同 requestId** 的 `user/message`（真页面实测 seq 8 与 22）；**同一次提交重发** → **409 `duplicate`**，且证据是**比本次调用更旧**的 seq（`verified.seq: 22 < before: 25`）—— 假绿变成如实报红。
+- **`asset-upload` 端到端，跑在真实的 Skill 页面上**（bypage 的逐页审阅面，`dir` 就是那个真实项目的审阅目录）：页面上传控件亮起来（20 个 dropzone）、走页面自己的 `uploadFiles` 路径上传一张真图 → 落在 `uploads/page-03/probe-*.png`，**74 字节、sha256 与源文件一致、逐字节相同、在审阅目录之内**；而**收件层的解析基准落点与它完全相同**（`resolve(dirname(feedbackPath), path)`）。同一个页面换成**不声明**该能力的 surface → 页面拿到 `capabilities: []`，宿主那条路由回 **403 + "这个 surface 没有声明 asset-upload 能力，拒绝上传"**，磁盘上什么都没写。
 - **`read` / `readText`**：帧里 `await review.readText('review-surface.json')` 拿到的**字符数与磁盘上那份完全一致**、JSON 解析出正确的 `contract_version`；`read` 拿到的是真正的 `ArrayBuffer`（491 字节）而不是 base64。
 - **变化戳，经真实浏览器的桥验过**：不碰被 watch 的文件时 3 个轮询周期内 `review.on('changed')` **零次**触发；改一次文件**恰好一次**；值不变不重复；再改一次第二次。全程帧的 nonce 不变（没有重载），且**控制台零输出** —— 既没有"旧拼法"的 warn，也没有"不认识的类型"的 warn，证明到达页面的是规范拼法。宿主侧的"元数据 → 计数器"另有一组单元测试（真实 `stat`、真实文件）。
 
@@ -273,7 +281,7 @@ ln -sfn /path/to/dsh-review-dock ~/.dsh/profiles/web/node_modules/dsh-review-doc
 
 - **变化信号走轮询，不走推送**：面板每 2 秒调一次 `/api/review.current`，它同时带回"Agent 换了面"（`revision`）与"被 watch 的元数据动了"（`changedSeq`）。没有 SSE —— 见上一节的理由。
 - **宿主只送规范拼法 `review/changed`**：桥也认它。桥对旧拼法 `changed` 容忍但会 `console.warn`，对任何不认识的 `review/*` 类型也会出声 —— 这条线最坏的失败方式是**静默**（页面一动不动、零报错），所以两边都不许安静。
-- **`upload` 只透传能力、未实现**：surface 声明 `capabilities: ["asset-upload"]` 会被如实带给页面，但调用会明确失败，页面据此退化。宿主不猜测、不静默成功。
+- **上传有上限（16 MiB）**：见上一节 —— 这是相对无插件宿主**有意收紧**的一处，理由是字节要经过面板中继；超限是明确的 413，不是静默截断。
 - **`?surface=` 接受任意绝对路径**：保护来自"必须带浏览器会话 cookie" + "只送 `dir` 树内、realpath 校验"。
 - **真正的隔离边界是浏览器沙箱**：页面是 `sandbox="allow-scripts"` 的不透明源，读不到应用 DOM / storage / API（实测连 `document.cookie` 都抛 `SecurityError`）。
 - **多会话并行**：`/api/review.current` 是进程级单例，两个会话同时用会互相抢面板；「最近的面」按浏览器记，不按会话记。
