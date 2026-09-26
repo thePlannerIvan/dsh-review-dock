@@ -217,7 +217,11 @@ dsh web --dump-config | grep -A 2 review-dock      # 组合出来的 profile 树
 curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:PORT/api/review.nonexistent   # 404
 # 带 cookie 请求 /api/review.current 应当是 200 并回 {"ok":true,...}
 ```
-最后一条是关键：`/api/*` 对**未登录**请求一律回 401（连不存在的路径也是），所以**没有 cookie 时看不出插件在不在**；带上会话 cookie 之后，注册过的路径回 200/400，没注册的回 404。UI 上的确认更直接：右侧栏的标签条会出现「审阅」这个 kind。
+最后一条是关键：`/api/*` 对**未登录**请求一律回 401（**连从未注册过的路径也是**），所以**没有 cookie 时看不出插件在不在**；带上会话 cookie 之后，注册过的路径回 200/400，没注册的回 **404**。UI 上的确认更直接：右侧栏的标签条会出现「审阅」这个 kind。
+
+> **一道对所有请求都同样回答的围栏，证明的是围栏，不是门后的东西。**
+> 验收必须有一个**会失败的对照组**：这里是"带上 cookie 之后，注册过的路径 ≠ 从未注册的路径（404）"。
+> 只看到一串 401 就宣布"路由都在"，是把围栏当成了门。
 
 **卸载**：
 
@@ -255,7 +259,13 @@ ln -sfn /path/to/dsh-review-dock ~/.dsh/profiles/web/node_modules/dsh-review-doc
 - **`read` / `readText`**：帧里 `await review.readText('review-surface.json')` 拿到的**字符数与磁盘上那份完全一致**、JSON 解析出正确的 `contract_version`；`read` 拿到的是真正的 `ArrayBuffer`（491 字节）而不是 base64。
 - **变化戳，经真实浏览器的桥验过**：不碰被 watch 的文件时 3 个轮询周期内 `review.on('changed')` **零次**触发；改一次文件**恰好一次**；值不变不重复；再改一次第二次。全程帧的 nonce 不变（没有重载），且**控制台零输出** —— 既没有"旧拼法"的 warn，也没有"不认识的类型"的 warn，证明到达页面的是规范拼法。宿主侧的"元数据 → 计数器"另有一组单元测试（真实 `stat`、真实文件）。
 
+**安装（在全新 `DSH_HOME` 里真跑过，不是"应该能装"）**：`dsh plugin --profile web add <路径>` → 依赖与 `dsh.profile.bundles` 被自动写好 → 组合树出现 `# == dsh-review-dock` → 带 cookie 的 `/api/review.current` 回 200（未注册路径回 404）→ 浏览器里标签条出现「审阅」并**成功打开一个面**（帧内 `ReviewBridge.VERSION = "2.0.0"`）→ `remove` 之后重启，同一条路由回 **404**。**声明了 `peerDependencies` 之后再从头装一遍同样通过**（`Done in 338ms`，pnpm 没有去 registry 抓 `@deepseek-ai/dsh`）。
+
+**版本闸门**：直接调用 DSH 自己的 `evaluatePluginCompatibility` 验证 —— `0.1.7-rc.1` / `0.1.7-rc.2` / `0.1.8` 接受，`0.2.0` 拒绝并给出处置命令。
+
 `0.1.7-rc.1` 上同样存在本插件依赖的两个 API（`connection.fetch.register`、`sidebarRightTabs.register({ keepMounted })`），但未逐项回归。
+
+**尚未验证（要等仓库发布之后才能验，属 B9 验收项，不是已知缺陷）**：`dsh plugin --profile web add github:<repo>` 这种 **git 形式**的安装；以及把 `npm pack` 出来的 **tgz** 装进去。两者都只从 CLI 源码确认了形式受支持，**没有真跑过** —— 所以本文件不说"支持"。
 
 **Node ≥ 20**（见 `package.json` 的 `engines`）。
 
