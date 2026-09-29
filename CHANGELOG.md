@@ -2,6 +2,16 @@
 
 本文件记录对外可见的变更。破坏性变更单独成节。
 
+## 0.2.1 — 让 0.2 线的 DSH 能认出这个插件
+
+**症状**：DSH 桌面应用升到 `0.2.0-rc.2` 之后，右侧栏的「审阅」标签和 `review_open` 工具一起消失；profile 里的声明看着完好。
+
+**根因**：`peerDependencies` 只写了 `"@deepseek-ai/dsh": "^0.1.7-rc.1"`。`^0.1.x` 的上界是 `0.2.0`（不含），而 `0.2.0-rc.2` 落在 `<0.2.0` 之内 **却仍被 semver 判为不满足**（上界比较器没有 prerelease，prerelease 不参与）。宿主的 `loadProfile` 因此把这条 bundle 跳过；由应用托管的 `desktop` profile 跳过时**不打印任何东西**，于是它是静默消失的。
+
+**修复**：`peerDependencies` 改为 `"@deepseek-ai/dsh": "^0.1.7-rc.1 || ^0.2.0-rc.1"`。0.1 线与 0.2 线都在闸门内；`0.3.0` 仍然被拒并照旧给出 `dsh plugin allow-version` 处置命令。
+
+**回归**：见 README 的「已验证 → `0.2.0-rc.2` 上的回归」。宿主 API 逐个核对未变（`connection.fetch.register`、`tools.register`、`sessionController.inspect/prompt`、`agent/inbox/spliced`、`sidebarRightTabs.register`），因此这一版**只动版本闸门，不动任何一行业务代码**。
+
 ## 0.2.0 — 泛化：插件不再懂任何一种审阅
 
 这一版把插件从"一个带自己审阅 UI 的 ppt 面板"改成"任何审阅面的宿主"。**没有兼容层**，按 Q4 的裁定：老的不要了。

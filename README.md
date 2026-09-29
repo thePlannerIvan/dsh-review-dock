@@ -217,6 +217,8 @@ dsh plugin --profile web add github:thePlannerIvan/dsh-review-dock
 
 这条命令会做三件事：把插件加进 `~/.dsh/profiles/web/package.json` 的 `dependencies`、把 `"dsh-review-dock"` 追加进同一份文件里的 `dsh.profile.bundles`、然后 `pnpm` 把它装进 profile 的 `node_modules`。**不需要手动编辑任何文件。**
 
+**装在 DSH 桌面应用里**（`desktop` profile，由应用托管）：CLI 会被拒（`profile "desktop" is managed exclusively by the Electron application`），改用应用内的**插件管理器**，安装源填插件的绝对路径。它是**热生效**的 —— 不用重启应用：`review_open` 立刻出现在工具表，`sidebar.right.pane.tab` 的占用者里立刻出现 `dsh-review-dock`。装完确认两处，都不要手改：`~/.dsh/profiles/desktop/package.json` 的 `dependencies` 有 `dsh-review-dock`，且 `dsh.profile.bundles` 里有同名条目。
+
 **确认装上了**（三种，任选）：
 
 ```bash
@@ -237,7 +239,9 @@ dsh plugin --profile web remove dsh-review-dock
 # 重启 dsh web
 ```
 
-**版本要求**：`peerDependencies` 声明 `"@deepseek-ai/dsh": "^0.1.7-rc.1"`（这是 DSH 自己的约定，插件管理器按 semver 逐项校验 `@deepseek-ai/dsh*`）。在 `0.1.7-rc.1` 与 `0.1.7-rc.2` 上实测通过；`0.1.x` 其余版本预期可用；换到 `0.2.x` 之类的运行时，管理器会**拒绝加载**并打印一条处置命令（`dsh plugin allow-version … --accept-risk`），而不是带着风险静默跑起来。
+**版本要求**：`peerDependencies` 声明 `"@deepseek-ai/dsh": "^0.1.7-rc.1 || ^0.2.0-rc.1"`（这是 DSH 自己的约定，插件管理器按 semver 逐项校验 `@deepseek-ai/dsh*`，**prerelease 参与区间比较**）。0.1 线与 0.2 线都在闸门内；换到未声明的运行时，管理器会**拒绝加载**并打印一条处置命令（`dsh plugin allow-version … --accept-risk`），而不是带着风险静默跑起来。
+
+> **区间写窄了会静默消失。** 只看 `^0.1.7-rc.1` 时，`0.2.0-rc.2` 不满足（`<0.2.0` 的上界不含 0.2.0 的 prerelease），宿主的 `loadProfile` 会把这条 bundle **跳过**：桌面端 profile 由应用托管，跳过时不打印任何东西 —— 侧栏标签消失、`review_open` 从工具表里消失，而 profile 里的声明看起来完好无损。
 
 **开发模式**（改 `lib/client.js` 不想重启时）才用软链：
 
@@ -269,7 +273,11 @@ ln -sfn /path/to/dsh-review-dock ~/.dsh/profiles/web/node_modules/dsh-review-doc
 
 **安装（在全新 `DSH_HOME` 里真跑过，不是"应该能装"）**：`dsh plugin --profile web add <路径>` → 依赖与 `dsh.profile.bundles` 被自动写好 → 组合树出现 `# == dsh-review-dock` → 带 cookie 的 `/api/review.current` 回 200（未注册路径回 404）→ 浏览器里标签条出现「审阅」并**成功打开一个面**（帧内 `ReviewBridge.VERSION = "2.0.0"`）→ `remove` 之后重启，同一条路由回 **404**。**声明了 `peerDependencies` 之后再从头装一遍同样通过**（`Done in 338ms`，pnpm 没有去 registry 抓 `@deepseek-ai/dsh`）。
 
-**版本闸门**：直接调用 DSH 自己的 `evaluatePluginCompatibility` 验证 —— `0.1.7-rc.1` / `0.1.7-rc.2` / `0.1.8` 接受，`0.2.0` 拒绝并给出处置命令。
+**版本闸门**：直接调用 DSH 自己的 `evaluatePluginCompatibility` 验证 —— `^0.1.7-rc.1 || ^0.2.0-rc.1` 接受 `0.1.7-rc.1` / `0.1.7-rc.2` / `0.1.8` / `0.2.0-rc.1` / `0.2.0-rc.2` / `0.2.5`，拒绝 `0.3.0` 并给出处置命令。
+
+**`0.2.0-rc.2` 上的回归**（隔离 `DSH_HOME` 实测）：组合树出现 `# == dsh-review-dock`；带 cookie 的 `/api/review.current` 回 **200**，`review.surface` / `review.page` / `review.asset` 回 400（已注册、缺参），POST 的 `review.wake` / `review.write` / `review.upload` 回 400，**未注册路径回 404**（对照组）；`review.bridge` 回 200 且字节来自 Skill 里的 `review-bridge.js`。依赖的宿主 API 逐个核对未变：`connection.fetch.register`、`tools.register`（`output.render` 仍是必填）、`sessionController.inspect` / `prompt`、`agents.get(id).inbox.nextTurn` / `nextStep`、`agent/inbox/spliced`、`user.message.source.rpcId`、`sidebarRightTabs.register({ keepMounted })`、`sidebar.right.pane.tab` 与 `.title`。
+
+在**由应用托管的 `desktop` profile** 上安装（`dsh plugin --profile desktop` 会被拒，改用应用的插件管理器），host 与 client 两半都无需重启即生效：`review_open` 出现在工具表，`sidebar.right.pane.tab` 的占用者里出现 `dsh-review-dock`，声明落在 `~/.dsh/profiles/desktop/package.json` 的 `dependencies` 与 `dsh.profile.bundles` 两处。
 
 `0.1.7-rc.1` 上同样存在本插件依赖的两个 API（`connection.fetch.register`、`sidebarRightTabs.register({ keepMounted })`），但未逐项回归。
 

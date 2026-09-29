@@ -1,6 +1,6 @@
 {
   "name": "dsh-review-dock",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "DSH 右侧栏的通用审阅宿主：任何 Skill 交一份 review-surface.json 与自己的审阅页，人就在侧栏里审；页面通过 postMessage 桥读写资产、落反馈，并唤醒 Agent。",
   "type": "module",
   "main": "lib/index.js",
@@ -42,7 +42,7 @@
     "node": ">=20"
   },
   "peerDependencies": {
-    "@deepseek-ai/dsh": "^0.1.7-rc.1"
+    "@deepseek-ai/dsh": "^0.1.7-rc.1 || ^0.2.0-rc.1"
   },
   "dsh": {
     "bundle": {
