@@ -12,7 +12,7 @@
 
 **边界（这一版没有改的）**：`agent/inbox/spliced` 与随后的 `user/message` **不是两条消息**，是同一条消息（同一个 `requestId`）在 DSH 里的两段式交接：先进持久队列（`target=next-turn`），回合开始时被提升到 `next-step`，再被回合取走成为 `user/message`。会话日志里按 `requestId` 去重后，每次提交只有一条 `user/message`；这一版不动 `wake.mode`（`queue` 仍是空闲会话唯一的投递路径）。
 
-**回归**：取 `lib/index.js` 里的真函数跑三例 —— 同一次提交重发（只改 `submitted_at`／`wake`／`items[].id`）身份不变；改了 `feedback` 文字身份必变；换会话身份必变。
+**回归**：`npm test`（`test/submission-identity.test.mjs`，4 例）。它把 `lib/index.js` 里的真函数切出来跑，不是另抄一份：同一次提交重发（只改 `submitted_at`／`wake`／`items[].id`）身份不变；改了 `feedback` 文字身份必变；换会话身份必变；剥离只动投递记录、不丢内容、也不改调用方传进来的对象。
 
 ## 0.2.1 — 让 0.2 线的 DSH 能认出这个插件
 
