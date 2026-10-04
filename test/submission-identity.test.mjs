@@ -85,6 +85,28 @@ test('a re-send of the same submission keeps the same identity', () => {
   )
 })
 
+test('the page write-back after a wake cannot cross-wire two concurrent submits', () => {
+  // `push()` is write → wake → write(the wake receipt). Two clicks that overlap
+  // interleave those three calls, so the second wake can read the identity that
+  // the FIRST push's write-back just installed, while the first wake used the
+  // one before it. If those two differ, one click becomes two prompts. They can
+  // only differ if the write-back changes identity — and it must not: it adds
+  // nothing but the receipt.
+  const beforeWake = base()
+  const afterWake = base()
+  afterWake.provenance.wake = {
+    requested: true,
+    verified: { state: 'queued', where: 'agents.get(sessionId).inbox' },
+    at: '2026-10-04T10:00:03.000Z',
+  }
+
+  assert.equal(
+    submissionOf('session-1', '/p/surface.json', afterWake),
+    submissionOf('session-1', '/p/surface.json', beforeWake),
+    'the write-back must not advance the identity, or an overlapping second click wakes the model again',
+  )
+})
+
 test('a changed submission still gets a new identity', () => {
   const first = base()
   const edited = base()
