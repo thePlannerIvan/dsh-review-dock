@@ -2,6 +2,18 @@
 
 本文件记录对外可见的变更。破坏性变更单独成节。
 
+## 0.2.2 — 重发同一次提交不再唤醒两次
+
+**症状**：人点一次「本页要求修改」，模型有时会认为自己收到了两条同样的消息。
+
+**根因**：唤醒身份按契约是"本次 feedback payload 的哈希"，靠页面每次 `collect()` 盖上新的 `provenance.submitted_at` 与新的 `items[].id` 来区分不同提交。可这三个字段**在同一次提交被重发时也会变** —— 页面重试、断线重连、重新投递，拿到的是一个**新身份**，于是去重不生效，`prompt` 被真的投了第二次。README 里写的"同一次提交重发时 payload 不变 → 身份不变 → 天然幂等"，在页面这一侧从来不成立。
+
+**修复**：哈希前先过一层 `submissionIdentity()`，剥掉三样投递记录 —— `provenance.submitted_at`、`provenance.wake`、每条 `items[].id`。结论、文字、框选、图片、每页版本号全部留在哈希里，所以真改过的提交照样是新身份；同一次提交重发则拿到同一身份，被去重成一次。
+
+**边界（这一版没有改的）**：`agent/inbox/spliced` 与随后的 `user/message` **不是两条消息**，是同一条消息（同一个 `requestId`）在 DSH 里的两段式交接：先进持久队列（`target=next-turn`），回合开始时被提升到 `next-step`，再被回合取走成为 `user/message`。会话日志里按 `requestId` 去重后，每次提交只有一条 `user/message`；这一版不动 `wake.mode`（`queue` 仍是空闲会话唯一的投递路径）。
+
+**回归**：取 `lib/index.js` 里的真函数跑三例 —— 同一次提交重发（只改 `submitted_at`／`wake`／`items[].id`）身份不变；改了 `feedback` 文字身份必变；换会话身份必变。
+
 ## 0.2.1 — 让 0.2 线的 DSH 能认出这个插件
 
 **症状**：DSH 桌面应用升到 `0.2.0-rc.2` 之后，右侧栏的「审阅」标签和 `review_open` 工具一起消失；profile 里的声明看着完好。
