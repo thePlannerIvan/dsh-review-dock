@@ -117,7 +117,7 @@ if (hasPromptRequest(agent, request.requestId)) return { accepted: true }   // �
 
 `init` 里的 `capabilities` 是**"这个面现在真正能用的"**，不是 surface 声明了什么，也不是宿主支持什么 —— 是两者的交集。**广告一个做不到的能力，等于让页面摆出一个必然失败的控件。**
 
-本宿主目前**只有 `asset-upload`** 一项，而且它已经**真的能用**（`POST /api/review.upload` 落盘）：surface 声明 `["asset-upload"]` → 页面拿到 `["asset-upload"]`，上传控件亮起来；surface 不声明 → 页面拿到 `[]`，而且**即便绕过页面直接调那条路由也会被 403 拒掉**。广告一个做不到的能力等于让页面摆出一个必然失败的控件，所以这一列只放做完的事。
+本宿主目前有 `asset-upload` 与 `draft` 两项，而且它已经**真的能用**（`POST /api/review.upload` 落盘）：surface 声明 `["asset-upload"]` → 页面拿到 `["asset-upload"]`，上传控件亮起来；surface 不声明 → 页面拿到 `[]`，而且**即便绕过页面直接调那条路由也会被 403 拒掉**。广告一个做不到的能力等于让页面摆出一个必然失败的控件，所以这一列只放做完的事。
 
 **上传上限：16 MiB。** 无插件宿主没有上限（它只有连接层 300 MiB 兜底），那是**缺口而不是范本**：这些字节还要作为 postMessage 载荷穿过面板，父页面与帧里各驻留一份，所以一次调用该有个界。16 MiB 是一张 1920×1080 PNG 的好几倍。超限回 **413** 并在正文里写清"多少字节 > 上限"。
 
@@ -171,7 +171,7 @@ Sec-Fetch-Site: cross-site        Cookie: absent
 | 选哪个面 | 工具 `review_open`；面板轮询 `/api/review.current` 认领标签页 |
 | 显示 | `/api/review.page` —— serve surface 的入口 HTML，并把桥注入进去 |
 | 递字节 | `/api/review.asset`（单文件，realpath 校验必须落在 `dir` 内）；`/api/review.bridge` |
-| 落盘 + 唤醒 | `/api/review.write`（**把 payload 原样写进 feedback**）；`/api/review.wake`（页面给 `text` 就用它整句，否则套 surface 的 `wake.text` 并替换 `{unit}`） |
+| 落盘 + 唤醒 | `/api/review.write`（**把 payload 原样写进 feedback —— 这是决定**）；`/api/review.draft`（同一个纪律，写进 surface 声明的 `draft` 文件 —— **这是没提交的草稿**：不唤醒、Skill 不许当它是收件）；`/api/review.wake`（页面给 `text` 就用它整句，否则套 surface 的 `wake.text` 并替换 `{unit}`） |
 
 ## HTTP 面
 
@@ -184,7 +184,8 @@ GET  /api/review.page?surface=<abs json>      入口 HTML（桥已注入；缺�
 GET  /api/review.bridge                       桥的具名出处（页面并不直接取它）
 GET  /api/review.asset?surface=<abs json>&rel=  dir 树内的一个文件
 POST /api/review.upload?surface=<abs>&rel=   原始字节写进 dir 内的 rel（上限 16 MiB）
-POST /api/review.write                        {"surface","payload"} → 把 payload 原样写进 feedback 文件
+POST /api/review.write                        {"surface","payload"} → 把 payload 原样写进 feedback 文件（决定）
+POST /api/review.draft                        {"surface","payload"} → 把 payload 原样写进 draft 文件（未提交的草稿）
 POST /api/review.wake                         {"surface","unit","sessionId"} → 递一句 prompt
 ```
 
