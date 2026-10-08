@@ -1,5 +1,9 @@
 # DSH Review Dock
 
+可选命令通道：`review.command(payload)` 经认证父窗口转发到 `/api/review.command`，再调用已安装的 Planners Review Core（`planners-review-core`）的共享 runner。插件从 Skill 安装目录发现 Core，并使用同一份 Core 的桥与 runner；surface 声明 `command_backend: "svg-workbench/1"` 与 `command` 能力。命令、回执和模型 CLI 的边界见该 Core 安装目录下的 `references/command-transport.md`。插件不增加整套侧栏反馈控件。
+
+仅在隔离测试或需要显式选择 Core 安装时，将 `reviewCoreDir` 或 `DSH_REVIEW_CORE_DIR` 设为目标 Core 的绝对目录；测试可指向候选副本，普通安装无需候选目录。显式指定优先于自动发现；修改配置后重新加载插件。
+
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0--only-2563eb)](LICENSE)
 
 把**审阅**做成 DSH 右侧栏里的一页：不是弹窗、不是另开的网页，而是和文件树、终端并列的原生标签页。
