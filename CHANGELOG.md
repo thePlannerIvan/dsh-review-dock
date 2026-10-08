@@ -1,6 +1,18 @@
-# CHANGELOG
-
 本文件记录对外可见的变更。破坏性变更单独成节。
+
+## 0.2.3 — 多一条 `/api/review.draft`：草稿与决定分开两个文件
+
+**起因（来自 planners-ppt-hell 的真人反馈）**：作者问「我的意见、框选、直改应该自动落盘在文件里，为什么还需要提交？」——因为以前只有 `write` 这一条落盘路径，而它同时是「提交 ＋ 唤醒模型」。于是没提交的东西只活在页面内存里，刷新即丢；人以为「提交」是保存按钮。
+
+**改了什么**：新增 `POST /api/review.draft`，和 `write` 同一个纪律（payload 就是文件、与无插件宿主逐字节一致、落盘前做 `project_root` 包含性校验），但是**另一个文件**：`feedback` 是**决定**（Skill 按轮次收件），`draft` 是**未提交的草稿**（Skill 不许当它是收件）。surface 用 `draft` 字段声明落点，用 `draft` 能力告诉页面可以走这条路（`HOST_CAPABILITIES` 加 `draft`）。
+
+**为什么必须分开**：合成一个文件就等于把「我改了东西」和「告诉模型可以动手」绑成一个动作 —— 模型会在半句话上开始动手。
+
+**拒绝的情形**：surface 没声明 `draft`（409）、`draft` 越出 `project_root`（403）、`draft` 与 `feedback` 是同一个文件（409）。
+
+**验证**：`planners-review-core` 的 `node evals/run.mjs` 里加了两条（桥的两条通道都实现 `draft` 且按 capabilities 声明走；无插件宿主 `POST /__review/draft` 原样落盘且不与 feedback 同文件）。两个宿主对同一条路由的行为由那一份回归同时盯着。
+
+。破坏性变更单独成节。
 
 ## 0.2.2 — 重发同一次提交不再唤醒两次
 
