@@ -97,6 +97,7 @@ integrationTest('plugin validates method, content-type and malformed requests', 
 
 integrationTest('DSH registration uses exported command handler, not a model tool', async (t) => {
   const f = await commandFixture(t)
+  const g = await commandFixture(t)
   const routes = []
   const tools = []
   const context = {
@@ -109,6 +110,22 @@ integrationTest('DSH registration uses exported command handler, not a model too
   assert.deepEqual(route.methods, ['POST'])
   assert.equal((await (await route.fetch(request(f, { op: 'state' }))).json()).ok, true)
   assert.equal(tools.length, 1, 'Only existing review_open is registered; model commands use CLI')
+  const reviewOpen = tools[0]
+  const missingSession = await reviewOpen.execute({ surface: f.surface }, { agent: { session: {} } })
+  assert.equal(missingSession.ok, false)
+  assert.match(missingSession.message, /当前会话身份/)
+  const openedVideo = await reviewOpen.execute({ surface: f.surface }, { agent: { session: { id: 'video-session' } } })
+  const openedPpt = await reviewOpen.execute({ surface: g.surface }, { agent: { session: { id: 'ppt-session' } } })
+  assert.equal(openedVideo.ok, true)
+  assert.equal(openedPpt.ok, true)
+  const current = routes.find((entry) => entry.path === '/api/review.current')
+  assert.ok(current)
+  const currentFor = async (sessionId) => (await current.fetch(new Request(
+    'http://dsh.local/api/review.current?sessionId=' + encodeURIComponent(sessionId),
+  ))).json()
+  assert.equal((await currentFor('video-session')).surface, f.surface)
+  assert.equal((await currentFor('ppt-session')).surface, g.surface)
+  assert.equal((await current.fetch(new Request('http://dsh.local/api/review.current'))).status, 400)
   const source = await readFile(new URL('../lib/client.js', import.meta.url), 'utf8')
   assert.match(source, /method === 'command'/)
   assert.match(source, /endpoint\('review.command'\)/)

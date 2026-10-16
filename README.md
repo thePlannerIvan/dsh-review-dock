@@ -260,7 +260,7 @@ ln -sfn /path/to/dsh-review-dock ~/.dsh/profiles/web/node_modules/dsh-review-doc
 ## 用法
 
 1. 打开右侧栏 → 引导页上点「审阅」胶囊。
-2. Agent 也能把你带过来：`review_open` 打开右侧栏并把面板指向那个面（面板通过 `/api/review.current` 认领标签页）。最近用过的面记在 `localStorage['dsh-review-dock:surface']`，刷新后回到同一个。
+2. Agent 也能把你带过来：`review_open` 打开右侧栏并把面板指向那个面（面板通过带当前 `sessionId` 的 `/api/review.current` 认领标签页）。审阅面按会话隔离；切换对话不会继承另一个对话的面，刷新后由当前会话重新认领。
 3. 之后的一切都在**页面上**：怎么列、怎么看、怎么下决定，是产出方设计的。
 
 ## 已验证
@@ -299,7 +299,7 @@ ln -sfn /path/to/dsh-review-dock ~/.dsh/profiles/web/node_modules/dsh-review-doc
 - **上传有上限（16 MiB）**：见上一节 —— 这是相对无插件宿主**有意收紧**的一处，理由是字节要经过面板中继；超限是明确的 413，不是静默截断。
 - **`?surface=` 接受任意绝对路径**：保护来自"必须带浏览器会话 cookie" + "只送 `dir` 树内、realpath 校验"。
 - **真正的隔离边界是浏览器沙箱**：页面是 `sandbox="allow-scripts"` 的不透明源，读不到应用 DOM / storage / API（实测连 `document.cookie` 都抛 `SecurityError`）。
-- **多会话并行**：`/api/review.current` 是进程级单例，两个会话同时用会互相抢面板；「最近的面」按浏览器记，不按会话记。
+- **多会话并行**：`/api/review.current` 按 `sessionId` 读取各自的 surface、revision 与变化戳；两个会话可以同时打开不同审阅面。侧栏不再用跨会话的浏览器缓存记忆 surface，切换会话时不会继承另一会话的面。
 - **页面作者要自己写"变了怎么办"**：宿主只负责把 `changed` 送进去，不负责页面怎么响应，也不碰人的输入状态。
 
 ## 品牌与署名

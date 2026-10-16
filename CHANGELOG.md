@@ -49,12 +49,12 @@
 | **契约** | `review-surface/1.0.0`（含 `units` / `version` / `decisions` / `required_decisions` / `assets`） | **`review-surface/2.0.0`**（只剩 `dir` / `entry` / `feedback` / `wake` / `capabilities`） |
 | **HTTP 面** | 裸挂 `webServer.register({ kind: 'prefix', path: '/ppt-review' })`，**无鉴权** | 全部移到 `connection` 的 **`/api/review.*`** 栅栏下（无 cookie 一律 401） |
 | **标签页 kind** | `ppt-review` | **`review`** |
-| **注册表目录** | `~/.dsh/ppt-review-dock/`（`projects.json` / `last-submit.json`） | **不再存在** —— 插件不再记项目；「最近的面」按浏览器记在 `localStorage['dsh-review-dock:surface']` |
-| **localStorage 键** | `ppt-review-dock:root` | **`dsh-review-dock:surface`**（存 surface 文件路径，不是项目根） |
+| **注册表目录** | `~/.dsh/ppt-review-dock/`（`projects.json` / `last-submit.json`） | **不再存在** —— 插件不再记项目；当前面按 **DSH 会话** 保存在进程内会话表 |
+| **会话隔离** | 进程级单例 / 浏览器 `localStorage` | **按 DSH 会话隔离**：`review_open` 必须拿到 `sessionId`，`/api/review.current` 也必须带同一身份 |
 | **bundle patch 行 id** | `ppt-review-dock` | **`review-dock`**（profile 的 `dsh.profile.bundles` 里仍是包名 `dsh-review-dock`，不用改） |
 | **自带审阅 UI** | 缩略图轨 / 16:9 舞台 / 框选 / 两枚决定按钮 | **删除** —— UI 下沉到产出方自己的页面 |
 
-**磁盘上旧的 `~/.dsh/ppt-review-dock/` 保持原样，不会被读也不会被删。** 想清掉自己 `rm -rf`。旧的 `localStorage['ppt-review-dock:root']` 不会被迁移，也不会被读。
+**磁盘上旧的 `~/.dsh/ppt-review-dock/` 保持原样，不会被读也不会被删。** 想清掉自己 `rm -rf`。旧的浏览器 surface 缓存不迁移，也不再作为会话绑定依据。
 
 ### 新增
 

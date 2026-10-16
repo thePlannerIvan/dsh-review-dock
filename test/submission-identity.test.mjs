@@ -139,3 +139,15 @@ test('identity never drops content, only the volatile stamps', () => {
   assert.equal(payload.provenance.submitted_at, '2026-10-04T10:00:00.000Z')
   assert.equal(payload.items[0].id, 'uid-AAA')
 })
+
+test('opened surfaces stay isolated by DSH session', async () => {
+  const { handleReviewCurrent } = await import('../lib/index.js')
+  const sessions = new Map([
+    ['video-session', { surface: '/tmp/video/review-surface.json', revision: 1, changedSeq: 0, token: null, watch: [] }],
+    ['ppt-session', { surface: '/tmp/ppt/review-surface.json', revision: 1, changedSeq: 0, token: null, watch: [] }],
+  ])
+  const video = await handleReviewCurrent(sessions, 'video-session')
+  const ppt = await handleReviewCurrent(sessions, 'ppt-session')
+  assert.deepEqual((await video.json()).surface, '/tmp/video/review-surface.json')
+  assert.deepEqual((await ppt.json()).surface, '/tmp/ppt/review-surface.json')
+})

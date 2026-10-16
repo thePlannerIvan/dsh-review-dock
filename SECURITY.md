@@ -11,7 +11,7 @@
 - `?surface=` 接受**任意绝对路径**，且 `?rel=` 由请求方给出。两层防线：① 必须带会话 cookie；② slug 解析后做 **realpath 包含性校验**，只送出落在 surface 声明的 `dir` 树内的文件，越界一律 403。**没有白名单** —— 能写出一份 surface 文件并让 Agent 打开它的人，就能让这个插件读那棵 `dir`。
 - **页面跑在不透明源的沙箱里**（`sandbox="allow-scripts"`，无 `allow-same-origin`）：它读不到应用的 DOM / localStorage / API（实测连 `document.cookie` 都抛 `SecurityError`），也**够不到 `/api`**（实测其子资源请求带 `Sec-Fetch-Site: cross-site` + 无 cookie，被 403 在认证之前拦掉）。资产与桥因此都由父页面递进去。
 - 桥的**反向鉴权只靠 `event.source === iframe.contentWindow`**：不透明源的 `event.origin` 是字符串 `"null"`，对所有沙箱帧都一样，**不能用来鉴权**。父页面另加一层每次实例一个的 nonce。
-- `/api/review.current` 是**进程级单例**：多会话并行时可能互相抢面板。「最近的面」按浏览器记（localStorage），不按会话记。
+- `/api/review.current` 按 DSH 会话隔离：每个会话有自己的 surface、revision 与变更戳；请求缺少 `sessionId` 会被拒绝。侧栏也不再用跨会话的 `localStorage` 记忆 surface，因此视频会话不会继承 PPT 会话的审阅面。
 - **页面是产出方写的代码**。它在你浏览器里跑，可以发同源请求（经父页面中转）。只挂你自己信任的 Skill 产出的 surface。
 
 ## 使用建议
