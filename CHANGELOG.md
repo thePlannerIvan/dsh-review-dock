@@ -1,3 +1,11 @@
+## 0.2.5 — 2026-10-17
+
+- 审阅 iframe 从 `sandbox="allow-scripts"` 改为 `sandbox="allow-scripts allow-same-origin"`。
+  原因：HyperFrames 官方播放器会在内部创建带 `allow-same-origin` 的嵌套 iframe；
+  外层不透明源会让内层继承 sandbox 限制，播放器永远不 `ready`，工程态预览黑屏。
+- 安全边界相应变化：审阅页现在是同源可信代码，可访问 DSH 应用 DOM / storage / API。
+  只应加载可信 Skill 的审阅页。
+
 本文件记录对外可见的变更。破坏性变更单独成节。
 
 ## 0.2.4 — 符号链接路径不再被误判成越界；0.2.1-rc.1 回归
