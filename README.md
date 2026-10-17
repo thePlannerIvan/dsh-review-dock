@@ -284,6 +284,8 @@ ln -sfn /path/to/dsh-review-dock ~/.dsh/profiles/web/node_modules/dsh-review-doc
 
 **`0.2.0-rc.2` 上的回归**（隔离 `DSH_HOME` 实测）：组合树出现 `# == dsh-review-dock`；带 cookie 的 `/api/review.current` 回 **200**，`review.surface` / `review.page` / `review.asset` 回 400（已注册、缺参），POST 的 `review.wake` / `review.write` / `review.upload` 回 400，**未注册路径回 404**（对照组）；`review.bridge` 回 200 且字节来自 Skill 里的 `review-bridge.js`。依赖的宿主 API 逐个核对未变：`connection.fetch.register`、`tools.register`（`output.render` 仍是必填）、`sessionController.inspect` / `prompt`、`agents.get(id).inbox.nextTurn` / `nextStep`、`agent/inbox/spliced`、`user.message.source.rpcId`、`sidebarRightTabs.register({ keepMounted })`、`sidebar.right.pane.tab` 与 `.title`。
 
+**`0.2.1-rc.1` 上的回归**（2026-10-17，隔离 `DSH_HOME` 实测）：组合树出现 `# == dsh-review-dock`；`review_open` 在工具表、`sidebar.right.pane.tab` 的占用者含 `dsh-review-dock`；`review.bridge` 返回的字节与 Core 桥 sha256 相等；`review.current` / `surface` / `page` / `asset` / `draft` / `write` / `wake` 的 200/400/403/404 与 0.2.0-rc.2 一致；Core 的 `node evals/run.mjs` 59/59，命令链路用真实 `workbench_store.py` 端到端跑通。DSH 0.2.1 起版本闸门优先看 `engines.dsh`（本包未声明，仍按 peer 区间判断），`^0.2.0-rc.1` 覆盖本版。
+
 在**由应用托管的 `desktop` profile** 上安装（`dsh plugin --profile desktop` 会被拒，改用应用的插件管理器），host 与 client 两半都无需重启即生效：`review_open` 出现在工具表，`sidebar.right.pane.tab` 的占用者里出现 `dsh-review-dock`，声明落在 `~/.dsh/profiles/desktop/package.json` 的 `dependencies` 与 `dsh.profile.bundles` 两处。
 
 `0.1.7-rc.1` 上同样存在本插件依赖的两个 API（`connection.fetch.register`、`sidebarRightTabs.register({ keepMounted })`），但未逐项回归。

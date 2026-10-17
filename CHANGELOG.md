@@ -1,5 +1,17 @@
 本文件记录对外可见的变更。破坏性变更单独成节。
 
+## 0.2.4 — 符号链接路径不再被误判成越界；0.2.1-rc.1 回归
+
+**症状**（2026-10-17，DSH 0.2.1-rc.1 升级后）：surface 放在任何带符号链接的路径下（macOS `/tmp` → `/private/tmp`、链接式的项目目录、外挂盘）时，`review.draft` 与 `review.write` 回 **403「越出 project_root」**，而 Core 的 surface 校验器对同一份文件判 **valid**。页面于是"能审、保存不了"。
+
+**根因**：写入前把 `project_root` realpath 了，却拿它跟**未 realpath 的目标路径**做前缀比较。两侧不在同一个坐标系里，链接路径永远比不中；这跟权限、能力声明都无关。
+
+**修复**：新增 `realpathTarget()` —— 先 realpath 最近的存在祖先，再把尚未创建的尾巴拼回去（写入方本来就负责 `mkdir -p`）。`draft` 与 `write` 两条路由都改成 **real 对 real**。真正的越界（目标是链接到根外的文件）仍然 403。
+
+**回归**：`npm test` 新增 `test/path-containment.test.mjs`，两例 —— ①经符号链接祖先的 surface 能正常写 draft/feedback；②目标经链接指向 `project_root` 外时必须 403。fixture 漂移另修：`commandFixture({ backend: 'candidate' })` 现在会连同 `workbench_store.py` 的兄弟 Python 模块（`canvas_frame.py` 等）一起复制，命令链路两条红测回绿。
+
+**0.2.1-rc.1 回归**（隔离 `DSH_HOME` 实测）：组合树出现 `# == dsh-review-dock`；`review_open` 在工具表；`sidebar.right.pane.tab` 占用者含 `dsh-review-dock`；`review.current/surface/page/bridge/asset/draft/write/wake` 的 200/400/403/404 行为与 0.2.0-rc.2 一致；`review.bridge` 返回的字节与 Core 桥 sha256 相等。宿主 API 逐项核对未变（`connection.fetch.register`、`tools.register`、`sessionController.inspect/prompt`、`agents.get(id).inbox`、`agent/inbox/spliced`、`sidebarRightTabs.register({ keepMounted })`、`sidebar.right.pane.tab` 与 `.title`）。另：`client.js` 上报的 host version 由陈旧的 `0.2.0` 改为包版本 `0.2.4`。
+
 ## 0.2.3 — 多一条 `/api/review.draft`：草稿与决定分开两个文件
 
 **起因（来自 planners-ppt-hell 的真人反馈）**：作者问「我的意见、框选、直改应该自动落盘在文件里，为什么还需要提交？」——因为以前只有 `write` 这一条落盘路径，而它同时是「提交 ＋ 唤醒模型」。于是没提交的东西只活在页面内存里，刷新即丢；人以为「提交」是保存按钮。
