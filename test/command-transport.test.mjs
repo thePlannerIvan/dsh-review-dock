@@ -111,9 +111,12 @@ integrationTest('DSH registration uses exported command handler, not a model too
   assert.equal((await (await route.fetch(request(f, { op: 'state' }))).json()).ok, true)
   assert.equal(tools.length, 1, 'Only existing review_open is registered; model commands use CLI')
   const reviewOpen = tools[0]
+  // No conversation identity is NOT a refusal any more: the surface waits to be
+  // claimed by the conversation whose panel is actually on screen.
   const missingSession = await reviewOpen.execute({ surface: f.surface }, { agent: { session: {} } })
-  assert.equal(missingSession.ok, false)
-  assert.match(missingSession.message, /当前会话身份/)
+  assert.equal(missingSession.ok, true)
+  assert.equal(missingSession.session_unknown, true)
+  assert.match(missingSession.warnings.join(' '), /认领/)
   const openedVideo = await reviewOpen.execute({ surface: f.surface }, { agent: { session: { id: 'video-session' } } })
   const openedPpt = await reviewOpen.execute({ surface: g.surface }, { agent: { session: { id: 'ppt-session' } } })
   assert.equal(openedVideo.ok, true)
@@ -123,8 +126,34 @@ integrationTest('DSH registration uses exported command handler, not a model too
   const currentFor = async (sessionId) => (await current.fetch(new Request(
     'http://dsh.local/api/review.current?sessionId=' + encodeURIComponent(sessionId),
   ))).json()
-  assert.equal((await currentFor('video-session')).surface, f.surface)
-  assert.equal((await currentFor('ppt-session')).surface, g.surface)
+  // The first poll after that identity-less open claims it; the other
+  // conversation must never see it.
+  const video = await currentFor('video-session')
+  assert.deepEqual(video.surfaces.map((entry) => entry.surface), [f.surface])
+  const ppt = await currentFor('ppt-session')
+  assert.deepEqual(ppt.surfaces.map((entry) => entry.surface), [g.surface])
+  assert.equal(video.surface, f.surface)
+  assert.equal(ppt.surface, g.surface)
+
+  // Two surfaces in ONE conversation: two entries, independent revisions, and the
+  // first one is still there (0.2.x would have kept only the second).
+  const again = await reviewOpen.execute({ surface: g.surface }, { agent: { session: { id: 'video-session' } } })
+  assert.equal(again.ok, true)
+  const firstRevision = video.surfaces[0].revision
+  const both = await currentFor('video-session')
+  assert.deepEqual(both.surfaces.map((entry) => entry.surface), [f.surface, g.surface])
+  assert.deepEqual(both.surfaces.map((entry) => entry.revision), [firstRevision, 1])
+  const reopened = await reviewOpen.execute({ surface: f.surface }, { agent: { session: { id: 'video-session' } } })
+  assert.equal(reopened.revision, firstRevision + 1, '同一份面再开只让它的 revision 走一格')
+  const afterReopen = await currentFor('video-session')
+  assert.deepEqual(
+    afterReopen.surfaces.map((entry) => entry.surface).sort(),
+    [f.surface, g.surface].sort(),
+    '刷新不许改变面的个数',
+  )
+  const revisionOf = (body, surface) => body.surfaces.find((entry) => entry.surface === surface).revision
+  assert.equal(revisionOf(afterReopen, f.surface), firstRevision + 1, '被再开的那一份 revision 走一格')
+  assert.equal(revisionOf(afterReopen, g.surface), 1, '别的面的 revision 不受牵连')
   assert.equal((await current.fetch(new Request('http://dsh.local/api/review.current'))).status, 400)
   const source = await readFile(new URL('../lib/client.js', import.meta.url), 'utf8')
   assert.match(source, /method === 'command'/)

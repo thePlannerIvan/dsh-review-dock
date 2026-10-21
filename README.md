@@ -172,7 +172,7 @@ Sec-Fetch-Site: cross-site        Cookie: absent
 
 | | 实现 |
 |---|---|
-| 选哪个面 | 工具 `review_open`；面板轮询 `/api/review.current` 认领标签页 |
+| 选哪个面 | 工具 `review_open`；面板轮询 `/api/review.current` 拿到本对话的**面清单**，一份面一个标签页 |
 | 显示 | `/api/review.page` —— serve surface 的入口 HTML，并把桥注入进去 |
 | 递字节 | `/api/review.asset`（单文件，realpath 校验必须落在 `dir` 内）；`/api/review.bridge` |
 | 落盘 + 唤醒 | `/api/review.write`（**把 payload 原样写进 feedback —— 这是决定**）；`/api/review.draft`（同一个纪律，写进 surface 声明的 `draft` 文件 —— **这是没提交的草稿**：不唤醒、Skill 不许当它是收件）；`/api/review.wake`（页面给 `text` 就用它整句，否则套 surface 的 `wake.text` 并替换 `{unit}`） |
@@ -182,7 +182,7 @@ Sec-Fetch-Site: cross-site        Cookie: absent
 **全部七条都在 Connection 的 `/api` 栅栏下**，任何一条没有浏览器会话 cookie 都返回 401，且请求的 `Origin` / `Sec-Fetch-Site` 必须先过 Host/Origin 校验：
 
 ```text
-GET  /api/review.current                      Agent 最后要求显示的面（+ revision）
+GET  /api/review.current?sessionId=<id>       本对话要显示的面清单（每份带 revision / changedSeq）
 GET  /api/review.surface?surface=<abs json>   面的 meta：id / title / capabilities / wakeMode
 GET  /api/review.page?surface=<abs json>      入口 HTML（桥已注入；缺注入点就拒绝）
 GET  /api/review.bridge                       桥的具名出处（页面并不直接取它）
@@ -286,6 +286,12 @@ ln -sfn /path/to/dsh-review-dock ~/.dsh/profiles/web/node_modules/dsh-review-doc
 
 **`0.2.1-rc.1` 上的回归**（2026-10-17，隔离 `DSH_HOME` 实测）：组合树出现 `# == dsh-review-dock`；`review_open` 在工具表、`sidebar.right.pane.tab` 的占用者含 `dsh-review-dock`；`review.bridge` 返回的字节与 Core 桥 sha256 相等；`review.current` / `surface` / `page` / `asset` / `draft` / `write` / `wake` 的 200/400/403/404 与 0.2.0-rc.2 一致；Core 的 `node evals/run.mjs` 59/59，命令链路用真实 `workbench_store.py` 端到端跑通。DSH 0.2.1 起版本闸门优先看 `engines.dsh`（本包未声明，仍按 peer 区间判断），`^0.2.0-rc.1` 覆盖本版。
 
+**0.3.0（一份面一个标签）的验收状态 —— 只做到哪一步，说清楚**：
+
+- 已验（可用命令重跑）：`npm test` **33 条全绿**，其中 7 条是面清单的状态机（追加 / 同名刷新 / 会话隔离 / 待认领与过期 / 每面独立的戳 / 兼容旧单值字段），7 条是客户端源码契约（`multiple: true`、面取自本标签 params、戳按面分发、每对话一个轮询、关掉的标签不被轮询开回来、空标签先被认领、标签名跟面走）。
+- 已验：`/api/review.current` 的**旧单值字段仍在**（`surface`/`revision`/`changedSeq`/`watching` 取最新那一份），所以 0.2.x 面板对着 0.3.0 宿主不会崩。
+- **未验**：真实浏览器里同时开两个标签、跨两个对话的隔离、以及人在关掉标签后"不会被轮询自己开回来"的体验。这三条要重启 DSH 后用真的两个 Skill 跑一遍才算数 —— 本文不把单元测试当成这件事已经成立。
+
 在**由应用托管的 `desktop` profile** 上安装（`dsh plugin --profile desktop` 会被拒，改用应用的插件管理器），host 与 client 两半都无需重启即生效：`review_open` 出现在工具表，`sidebar.right.pane.tab` 的占用者里出现 `dsh-review-dock`，声明落在 `~/.dsh/profiles/desktop/package.json` 的 `dependencies` 与 `dsh.profile.bundles` 两处。
 
 `0.1.7-rc.1` 上同样存在本插件依赖的两个 API（`connection.fetch.register`、`sidebarRightTabs.register({ keepMounted })`），但未逐项回归。
@@ -301,7 +307,9 @@ ln -sfn /path/to/dsh-review-dock ~/.dsh/profiles/web/node_modules/dsh-review-doc
 - **上传有上限（16 MiB）**：见上一节 —— 这是相对无插件宿主**有意收紧**的一处，理由是字节要经过面板中继；超限是明确的 413，不是静默截断。
 - **`?surface=` 接受任意绝对路径**：保护来自"必须带浏览器会话 cookie" + "只送 `dir` 树内、realpath 校验"。
 - **隔离边界已调整（0.2.5）**：页面使用 `sandbox="allow-scripts allow-same-origin"`，因此可以运行 HyperFrames 播放器这类需要内层同源 iframe 的工程态预览；代价是**审阅页被视为可信代码**，能访问 DSH 应用的 DOM / storage / API。只应在审阅页来源可信时使用。
-- **多会话并行**：`/api/review.current` 按 `sessionId` 读取各自的 surface、revision 与变化戳；两个会话可以同时打开不同审阅面。侧栏不再用跨会话的浏览器缓存记忆 surface，切换会话时不会继承另一会话的面。
+- **一个对话可以同时开好几份面**：一份面一个标签页（标签类型声明 `multiple: true`），名字取面自己的 `title`。同一份面再 `review_open` 是刷新那一个，不是新开一个；人关掉的标签不会被下一次轮询自己开回来 —— 只有该面的 `revision` 再走一格（也就是 Agent 又开了它）才会回来。
+- **侧栏里必须至少有一个审阅标签，Agent 才拉得动面板**：轮询住在标签页里（每个对话一个），而默认布局会给每个对话种一个「审阅」标签 —— 它就是第一个面落脚的地方（第一份面由它认领，之后每个新面各开一个标签）。如果人把这个唯一的标签关掉，列会收起、没人轮询，此时 `review_open` 不会自己把标签拉起来（与 0.2.x 相同）。这不是新缺陷，但值得知道。
+- **面归开它的那次对话**：`/api/review.current` 按 `sessionId` 读各自的面清单、revision 与变化戳，别的对话看不到、也不会被顶开。拿不到对话身份时 `review_open` **不拒绝**，面先进 10 秒的待认领队列，由当前显示的那次对话的侧栏认领，过期即丢。
 - **页面作者要自己写"变了怎么办"**：宿主只负责把 `changed` 送进去，不负责页面怎么响应，也不碰人的输入状态。
 
 ## 品牌与署名

@@ -142,12 +142,12 @@ test('identity never drops content, only the volatile stamps', () => {
 
 test('opened surfaces stay isolated by DSH session', async () => {
   const { handleReviewCurrent } = await import('../lib/index.js')
-  const sessions = new Map([
-    ['video-session', { surface: '/tmp/video/review-surface.json', revision: 1, changedSeq: 0, token: null, watch: [] }],
-    ['ppt-session', { surface: '/tmp/ppt/review-surface.json', revision: 1, changedSeq: 0, token: null, watch: [] }],
-  ])
-  const video = await handleReviewCurrent(sessions, 'video-session')
-  const ppt = await handleReviewCurrent(sessions, 'ppt-session')
-  assert.deepEqual((await video.json()).surface, '/tmp/video/review-surface.json')
-  assert.deepEqual((await ppt.json()).surface, '/tmp/ppt/review-surface.json')
+  const { createSurfaceRegistry } = await import('../lib/surfaces.js')
+  const registry = createSurfaceRegistry()
+  registry.open({ sessionId: 'video-session', surface: '/tmp/video/review-surface.json' })
+  registry.open({ sessionId: 'ppt-session', surface: '/tmp/ppt/review-surface.json' })
+  const video = await (await handleReviewCurrent(registry, 'video-session')).json()
+  const ppt = await (await handleReviewCurrent(registry, 'ppt-session')).json()
+  assert.deepEqual(video.surfaces.map((entry) => entry.surface), ['/tmp/video/review-surface.json'])
+  assert.deepEqual(ppt.surfaces.map((entry) => entry.surface), ['/tmp/ppt/review-surface.json'])
 })

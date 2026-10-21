@@ -21,15 +21,18 @@ test('frame src is keyed by the revision, not only by the surface path', () => {
 })
 
 test('the surface store treats a revision-only change as a change', () => {
-  assert.match(source, /revision/, 'store 必须记得 revision')
+  assert.match(source, /revisions: new Map\(\)/, 'store 必须记得 revision')
+  // 0.3.0: 键从「会话」变成「会话 + 面」，但早退判据仍然是 revision ——
+  // 路径没变、revision 变了必须继续通知，否则同一路径的重新交接不会重载。
   assert.match(
     source,
-    /this\.value === next && this\.revision === step|this\.get\(sessionId\) === next && this\.revision\(sessionId\) === step/,
+    /if \(this\.revisions\.get\(key\) !== step\)/,
     '路径相同但 revision 变了时必须继续通知，不能早退',
   )
+  assert.match(source, /if \(moved\) this\.notify\(\)/, '有变化就必须叫醒订阅者')
 })
 
 test('the poll hands the revision to the store', () => {
-  assert.match(source, /surfaceStore\.set\([^)]*revision[^)]*\)/,
+  assert.match(source, /surfaceStore\.setRevision\(sessionId, surface, revision, title\)/,
     '轮询拿到 revision 后必须交给 store，否则帧的 src 永远不变')
 })
