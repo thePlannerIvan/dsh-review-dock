@@ -29,6 +29,14 @@ Agent 产出 → review_open 打开审阅页 → 人在页面上审、写意见�
 
 关键在于**不阻塞**：提交是一个普通动作，写完盘再给当前会话递一句话，Agent 因此拿到一个普通 turn。对话全程可用。
 
+## 模型怎么知道该用它（这条缝的另一半）
+
+光有工具表还不够：模型得在**决定怎么干活之前**就知道"需要人反馈的任务可以放进侧栏"。插件因此注册一段很短的 system prompt（`tool:review_open`，order 2950，每轮都在）：任务需要人审阅、判断、修改、选择或批准时，做 `review-surface.json` + 自己的审阅页（裸 `{{REVIEW_BRIDGE}}` 注入点），跑 `planners-review-core` 的校验器，再调 `review_open`；**打开不等于同意，等提交那条消息再动手**。
+
+这段提示刻意**不复制契约**，只指名 `planners-review-core` 是权威 —— 契约只有一份，提示里再写一份就会漂移。它声明 `interpolate: false`：提示文本默认会被当成模板插值，而 `{{REVIEW_BRIDGE}}` 会被读成变量引用 —— 不关掉，标记要么消失、要么让**每一轮请求**的提示组装失败。`review_open` 的工具描述也写着同一个触发条件，所以即便提示服务不可用，工具本身仍然在教模型什么时候用它。
+
+验证：`test/prompt-seam.test.mjs` 钉住"注册一段、指向 Skill、提到注入点、随插件卸载"；真实的 system prompt 需要**重启 DSH** 后才会在下一轮请求里出现（当前会话的提示在启动时已组装）。
+
 ## 接缝
 
 ### `review-surface.json`（产出方 → 宿主）
@@ -49,7 +57,7 @@ Agent 产出 → review_open 打开审阅页 → 人在页面上审、写意见�
 }
 ```
 
-**契约的权威是 `planners-review-core`** 里的 `contracts/review-surface.schema.json` 与 `scripts/validate-surface.mjs`（唯一校验器）。本插件**只读这份文件的四个字段**（`dir` / `entry` / `feedback` / `wake`）与两个展示字段（`id` / `title`）—— 它不解释任何审阅语义。
+**契约的权威是 `planners-review-core`** 里的 `contracts/review-surface.schema.json` 与 `scripts/validate-surface.mjs`（唯一校验器）。本插件**只读这份文件的四个字段**（`dir` / `entry` / `feedback` / `wake`）与两个展示字段（`id` / `title`）；`draft` / `capabilities` / `watch` / `project_root` 只按契约使用；`contract_version` 只在**不匹配当前契约时**用来发一条 warning（不解释、不拒绝）—— 它不解释任何审阅语义。
 
 入口 HTML 里必须留一个 **`{{REVIEW_BRIDGE}}` 注入点**，并**不要**在页面里放一份桥的副本。宿主在 serve 时把桥注入进去，页面用同一份 `review-bridge.js` 在两种宿主下说同样的话：
 
@@ -94,16 +102,19 @@ if (hasPromptRequest(agent, request.requestId)) return { accepted: true }   // �
 
 > **哈希前必须先剥掉易变字段（0.2.2）。** 上面那句"每次提交必然不同"是靠 `submitted_at` 和 `items[].id` 撑起来的 —— 可这两个字段**在页面重新 `collect()` 时也会变**。于是"同一次提交重发"根本拿不到同一个身份：重试、断线重连、页面重新投递，每一个都会被当成一次新提交，**真的再唤醒模型一次**（本来去重就是为这件事存在的）。现在 `submissionIdentity()` 先把这三样剥掉再哈希 —— `provenance.submitted_at`、`provenance.wake`、每条 `items[].id`。它们是投递记录，不是提交内容；**结论、文字、框选、图片、每页版本号全部留在哈希里**，所以真改过的提交照样是一个新身份。
 
-**③ 核验必须比 seq，不能扫日志找同 id。** 命中去重的那一次，日志里**确实存在**同一个 requestId —— 只不过是**上一次**投递的。老实现从日志末尾往前扫整条日志，于是**在出事的那一次报了成功**（假绿，比故障本身更坏）。现在的规则是：`prompt` **之前**记下会话最新事件的 `seq`，之后只承认 **`seq > before`** 的证据。四种状态如实返回：
+**③ 核验必须比 seq，不能扫日志找同 id。** 命中去重的那一次，日志里**确实存在**同一个 requestId —— 只不过是**上一次**投递的。老实现从日志末尾往前扫整条日志，于是**在出事的那一次报了成功**（假绿，比故障本身更坏）。现在的规则是：`prompt` **之前**记下会话最新事件的 `seq`（活着的 Agent 直接读 `session.seq - 1`，冷会话才走 `state()` / 旧版 `inspect()`），之后只承认 **`seq > before`** 的证据。五种状态如实返回：
 
 | 状态 | 含义 | HTTP |
 |---|---|---|
 | `in-turn` | 有回合已经把它变成 `user/message` | 200 |
-| `queued` | 在持久队列里（`agent/inbox/spliced`），还没回合取走 | 200 |
+| `queued` | 在持久队列里（`agent/inbox/spliced` 或 `state().queue`），还没回合取走 | 200 |
 | `duplicate` | 这一次提交**之前**已经送达过，本次调用没有新增通知（带旧 `seq` 与 `before`） | 409 |
-| `undelivered` | 宿主说 accepted，日志里却没有任何新东西 —— 就是被去重吞了 | 502 |
+| `accepted-unverified` | 宿主说 accepted，但这个运行时**没有可读的会话 API**（或取不到 `before`）—— 送达与否无法核对，如实说"没核对" | 200（带 `warning`） |
+| `undelivered` | 有可用的核验器、也确实什么都没看到 —— 通知没落地 | 502 |
 
-调用方要**至少一次**语义时，`duplicate` 应当读作"已经送达"（它给了旧的 `seq`）；要"这一次调用是否投递"时它就是红。
+调用方要**至少一次**语义时，`duplicate` 应当读作"已经送达"（它给了旧的 `seq`）；要"这一次调用是否投递"时它就是红。`accepted-unverified` 不是"成功"，也不是"失败"：面板把它原话显示出来（"已提交；但当前宿主无法核对是否送达"），**既不许把没法核对说成成功，也不许把成功说成失败**。
+
+> **DSH 0.2.2 起 `sessionController.inspect()` 不存在了。** 0.2.1 及以前它是日志读口，0.2.2 换成了 `state({sessionId})`（被动状态 + 队列）和 `events({address, maxMessages})`（有界历史页）。插件旧代码无条件调 `inspect`，异常被两个空 `catch` 吞掉 —— 于是**日志核验整段静默变成死代码**，所有"消息已被回合取走/同一次提交重发"的唤醒都报 502。现在三个形状都探：`state`+`events`（0.2.2+）、`inspect`（≤0.2.1），**两者都没有时返回 `accepted-unverified` 而不是假红**。启动时还会逐项探测宿主 API，缺什么 `warn` 一次（`connection.fetch.register` / `tools.register` / `sessionController.prompt` / `inspect|state` / `agents.get`）。
 
 **宿主层报 409、面板层报"准确的成功"** —— 这两件事不矛盾，是同一个规则的两面：**不许把"没法核对"说成成功，也不许把成功说成失败。** `duplicate` 的真实语义是"这次提交已经落盘、而且之前已经送达过"，所以面板里显示的是
 
@@ -124,6 +135,8 @@ if (hasPromptRequest(agent, request.requestId)) return { accepted: true }   // �
 本宿主目前有 `asset-upload` 与 `draft` 两项，而且它已经**真的能用**（`POST /api/review.upload` 落盘）：surface 声明 `["asset-upload"]` → 页面拿到 `["asset-upload"]`，上传控件亮起来；surface 不声明 → 页面拿到 `[]`，而且**即便绕过页面直接调那条路由也会被 403 拒掉**。广告一个做不到的能力等于让页面摆出一个必然失败的控件，所以这一列只放做完的事。
 
 **上传上限：16 MiB。** 无插件宿主没有上限（它只有连接层 300 MiB 兜底），那是**缺口而不是范本**：这些字节还要作为 postMessage 载荷穿过面板，父页面与帧里各驻留一份，所以一次调用该有个界。16 MiB 是一张 1920×1080 PNG 的好几倍。超限回 **413** 并在正文里写清"多少字节 > 上限"。
+
+**上限是在读入时算的，不是读完再比。** `/api/review.upload` 用 `requestBody: 'streaming'`：先看 `Content-Length`，超了不读；没有声明就边流边计数，越过 16 MiB 立刻 `cancel()` 并回 413。连接层自己会缓冲到 300 MiB，读完再判等于先替一个越界请求付一次完整内存。
 
 **落盘位置**：`rel` 相对 **surface 的 `dir`**（与 `asset`/`read` 同一个基准），写入前做与 `asset` 同源的 realpath 包含性校验，并额外拒绝两条写操作特有的路径：**现有目标是符号链接**、以及**最近的已存在祖先经 realpath 后落在 `dir` 之外**（否则 `dir` 里一个指向外部的软链目录就能把新文件写到外面）。越界回 403。
 
@@ -179,17 +192,18 @@ Sec-Fetch-Site: cross-site        Cookie: absent
 
 ## HTTP 面
 
-**全部七条都在 Connection 的 `/api` 栅栏下**，任何一条没有浏览器会话 cookie 都返回 401，且请求的 `Origin` / `Sec-Fetch-Site` 必须先过 Host/Origin 校验：
+**全部十条都在 Connection 的 `/api` 栅栏下**，任何一条没有浏览器会话 cookie 都返回 401，且请求的 `Origin` / `Sec-Fetch-Site` 必须先过 Host/Origin 校验：
 
 ```text
-GET  /api/review.current?sessionId=<id>       本对话要显示的面清单（每份带 revision / changedSeq）
-GET  /api/review.surface?surface=<abs json>   面的 meta：id / title / capabilities / wakeMode
+GET  /api/review.current?sessionId=<id>       本对话要显示的面清单（每份带 revision / changedSeq）+ pollMs + host
+GET  /api/review.surface?surface=<abs json>   面的 meta：id / title / capabilities / wakeMode / host
 GET  /api/review.page?surface=<abs json>      入口 HTML（桥已注入；缺注入点就拒绝）
 GET  /api/review.bridge                       桥的具名出处（页面并不直接取它）
-GET  /api/review.asset?surface=<abs json>&rel=  dir 树内的一个文件
-POST /api/review.upload?surface=<abs>&rel=   原始字节写进 dir 内的 rel（上限 16 MiB）
+GET  /api/review.asset?surface=<abs json>&rel=  dir 树内的一个文件（流式送出）
+POST /api/review.upload?surface=<abs>&rel=   原始字节写进 dir 内的 rel（上限 16 MiB，读入时计数）
 POST /api/review.write                        {"surface","payload"} → 把 payload 原样写进 feedback 文件（决定）
 POST /api/review.draft                        {"surface","payload"} → 把 payload 原样写进 draft 文件（未提交的草稿）
+POST /api/review.command                     可选命令通道（surface 声明 command 能力时才可用）
 POST /api/review.wake                         {"surface","unit","sessionId"} → 递一句 prompt
 ```
 
@@ -292,7 +306,23 @@ ln -sfn /path/to/dsh-review-dock ~/.dsh/profiles/web/node_modules/dsh-review-doc
 - 已验：`/api/review.current` 的**旧单值字段仍在**（`surface`/`revision`/`changedSeq`/`watching` 取最新那一份），所以 0.2.x 面板对着 0.3.0 宿主不会崩。
 - **未验**：真实浏览器里同时开两个标签、跨两个对话的隔离、以及人在关掉标签后"不会被轮询自己开回来"的体验。这三条要重启 DSH 后用真的两个 Skill 跑一遍才算数 —— 本文不把单元测试当成这件事已经成立。
 
+**0.3.1（DSH 0.2.2 适配 + 模型发现 + 对话绑定）的验收状态 —— 同样只说做到的**：
+
+- 已验（`npm test`）：**58 条全绿**，新增 25 条 —— 对话绑定 5 条（放置走标签自己的 `tab.actions.openTab`、仅对话在屏幕上才展开右栏、放不进去的面停在待放置队列并在切回/重挂载后放、已放置但帧未挂载时只展开不重开、错放标签拒渲染）；wake 五态 × 两代 API（`state`+`events` / `inspect` / 无读口）+ `prompt` 缺失；上传的上限（流式越界、声明长度越界、正常写入、无能力 403）；桥的三种注入形态 + 缺注入点 409 + `contract_version` warning；模型发现段（注册一段、`interpolate: false`、指向 Skill、随插件卸载、无 prompt 服务仍装工具、注册失败只警告不拖垮插件）。
+- 已验（读 0.2.2 发行版源码，非猜测）：`SessionController` **没有 `inspect`**；`state()` 返回 `{cursor, queue[{rpcId, content}]}`（`readState`/`queueItems`）；`events()` 返回 `{records:[{type:'event',event}]}`（`history`/`pageRecords`）；`SessionState` 与 `agents.get(id).inbox` 的 `nextTurn`/`nextStep` 仍在。回归用一个只含 0.2.2 方法的假 `sessionController` 驱动**真实路由**，验证 `queued` / `in-turn` / `409 duplicate` / `502 undelivered` / `200 accepted-unverified`。
+- **已验（2026-11-08，重启桌面应用之后，在真实会话里用一份临时 self-test surface 跑通）**：
+  - system prompt 段确实进入了下一轮请求（模型侧可见原文）；
+  - `review_open` 返回的工具描述/`/api/review.surface` 的 `host` 都是 `0.3.1`，页面经 `/api/review.page` 加载、桥连接成功；
+  - `write` 落盘的 feedback 与页面 payload 逐字段一致，`wake-log.jsonl` 先 `kind:'write'` 后 `kind:'wake'`；
+  - 第一次 `wake` → `200 queued`，`verified.where: agents.get(sessionId).inbox`、`equalsWakeText: true`；
+  - **同一次提交重发** → `409 duplicate`，`verified.where: "session log: user/message"`、`seq: 1827 < before: 1845` —— 这是真实 `state`/`events` 日志读口跑出来的，不是假 controller；
+  - 同一份面 revision 变化会重载帧；两个面各自一个标签落在**本对话**的侧栏。
+- **仍未验**：后台对话（A 里开着审阅标签、人停在 B）的**双对话**演练 —— 绑定修复按 DSH 的 per-tab 语义实现并有客户端源码契约，但真机双对话要两个对话同时具备审阅标签与后台动作，本轮没有构造；上传上限的 live 403/413；错放标签提示的 live 显示；`accepted-unverified` 的 live 显示（真机上没有读口缺失的运行时）。**不把源码契约当成这些已经成立。**
+- 旧版 `inspect` 路径保留（0.1.7 / 0.2.0 / 0.2.1），并用假 controller 覆盖 —— 换运行时不能只保住新的一头。
+
 在**由应用托管的 `desktop` profile** 上安装（`dsh plugin --profile desktop` 会被拒，改用应用的插件管理器），host 与 client 两半都无需重启即生效：`review_open` 出现在工具表，`sidebar.right.pane.tab` 的占用者里出现 `dsh-review-dock`，声明落在 `~/.dsh/profiles/desktop/package.json` 的 `dependencies` 与 `dsh.profile.bundles` 两处。
+
+> 注意：**安装声明**热生效，**宿主代码**不热生效。`lib/index.js` 的改动要重启 DSH（桌面应用退出重开）；`lib/client.js` 是普通 JS，client-modules 重新哈希后刷新页面即可。
 
 `0.1.7-rc.1` 上同样存在本插件依赖的两个 API（`connection.fetch.register`、`sidebarRightTabs.register({ keepMounted })`），但未逐项回归。
 
@@ -308,7 +338,10 @@ ln -sfn /path/to/dsh-review-dock ~/.dsh/profiles/web/node_modules/dsh-review-doc
 - **`?surface=` 接受任意绝对路径**：保护来自"必须带浏览器会话 cookie" + "只送 `dir` 树内、realpath 校验"。
 - **隔离边界已调整（0.2.5）**：页面使用 `sandbox="allow-scripts allow-same-origin"`，因此可以运行 HyperFrames 播放器这类需要内层同源 iframe 的工程态预览；代价是**审阅页被视为可信代码**，能访问 DSH 应用的 DOM / storage / API。只应在审阅页来源可信时使用。
 - **一个对话可以同时开好几份面**：一份面一个标签页（标签类型声明 `multiple: true`），名字取面自己的 `title`。同一份面再 `review_open` 是刷新那一个，不是新开一个；人关掉的标签不会被下一次轮询自己开回来 —— 只有该面的 `revision` 再走一格（也就是 Agent 又开了它）才会回来。
-- **侧栏里必须至少有一个审阅标签，Agent 才拉得动面板**：轮询住在标签页里（每个对话一个），而默认布局会给每个对话种一个「审阅」标签 —— 它就是第一个面落脚的地方（第一份面由它认领，之后每个新面各开一个标签）。如果人把这个唯一的标签关掉，列会收起、没人轮询，此时 `review_open` 不会自己把标签拉起来（与 0.2.x 相同）。这不是新缺陷，但值得知道。
+- **轮询器按对话常驻**：每个挂过审阅标签的对话有一个 2 秒轮询（`setTimeout` 链，不是 `setInterval`），窗口隐藏时跳过请求。它不随标签关闭而销毁 —— "已经显示过的 revision"要留着，否则人一关标签下一次轮询就把它开回来。默认布局种的「审阅」标签只是第一份面的落脚点；关掉它，后续 `review_open` 在该对话在屏幕上时会立刻拉起一个，在屏幕外时先停在待放置队列、切回时再出现。
+- **审阅标签绑在开它的那个对话（0.3.1）**：后台对话的 `review_open` 不会再弹进你正在看的对话 —— 放置走该对话标签自己的 `tab.actions.openTab`，只有「这个面自己的对话在屏幕上」才允许走全局控制器，也只有那时才展开右栏。旧版本已经错放进来的标签（或被持久化布局带过来的）会显示「这份审阅属于另一个对话」，不渲染别人的审阅页。
+- **桥每请求重新解析**：`/api/review.page` 每次都按 mtime 挑最新的 `review-bridge.js`，不再把选择缓存到整个激活周期。否则 library 源改了、页面里内联的还是发布副本，直到重启 —— 而 `review_open` 的预检（每次重新解析）会看到新桥并报"准备好了"，两边说的不是同一份文件。
+- **宿主 API 会漂移，所以启动时探测**：`connection.fetch.register` / `tools.register` / `sessionController.prompt` / `inspect|state` / `agents.get` 缺哪一项都会 `warn` 一次；唤醒核验在拿不到读口时退化为 `accepted-unverified`，**不假装成功，也不假装失败**。
 - **面归开它的那次对话**：`/api/review.current` 按 `sessionId` 读各自的面清单、revision 与变化戳，别的对话看不到、也不会被顶开。拿不到对话身份时 `review_open` **不拒绝**，面先进 10 秒的待认领队列，由当前显示的那次对话的侧栏认领，过期即丢。
 - **页面作者要自己写"变了怎么办"**：宿主只负责把 `changed` 送进去，不负责页面怎么响应，也不碰人的输入状态。
 

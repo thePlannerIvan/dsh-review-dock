@@ -1,3 +1,59 @@
+## 0.3.1 — 2026-11-08
+
+**DSH 0.2.2 升级后，唤醒核验静默失效；顺带把"模型不知道有这个面"补上。** 这一版没有改
+`review-surface` 契约、没有改桥、没有改落盘字节 —— 与 `planners-review-core` 的接缝原样保留。
+
+- **宿主：唤醒核验迁到 0.2.2 的 API。** 0.2.2 删掉了 `sessionController.inspect()`（0.2.1
+  及以前是日志读口），旧代码无条件调它，异常被两个空 `catch` 吞掉 —— 日志核验整段变成死代码：
+  - `before` 恒为 -1，"只认比本次调用更新的证据"这条规则失效；
+  - 消息被回合取走、或**同一次提交重发**时，全部报 `502 undelivered`，原本应报 `in-turn` / `409 duplicate`。
+  现在三个形状都探：`state({sessionId})` + `events({address,maxMessages})`（0.2.2+）、`inspect`
+  （≤0.2.1）、两者都无时返回 **`accepted-unverified`**（HTTP 200 + `warning`，面板原话显示，
+  既不假绿也不假红）。`before` 优先取活的 `agent.session.seq - 1`，不再为一次唤醒读整条日志。
+- **宿主：启动时探测 API 漂移。** 逐项检查 `connection.fetch.register` / `tools.register` /
+  `sessionController.prompt` / `inspect|state` / `agents.get`，缺什么 `warn` 一次；不再让
+  "方法改名"表现为一次莫名其妙的人类提交失败。
+- **模型发现缝：** 注册一段 system prompt（`tool:review_open`，order 2950，`interpolate: false`）：需要人审阅/判断/
+  修改/选择/批准时，做 `review-surface.json` + 带裸 `{{REVIEW_BRIDGE}}` 的页面，按
+  `planners-review-core` 校验后调 `review_open`；"打开不等于同意，等提交那条消息"。提示只指名
+  Skill、不复制契约，契约仍只有一份。`interpolate: false` 是必须的：提示文本默认插值，
+  `{{REVIEW_BRIDGE}}` 会被当成变量引用，轻则标记消失、重则每一轮提示组装失败。
+- **上传上限改成读入时计数。** 路由改 `requestBody: 'streaming'`：先看 `Content-Length`，再边流边
+  数，越过 16 MiB 立即取消 —— 之前是连接层缓冲到 300 MiB 之后再比，上限形同虚设。
+- **feedback / draft 改成原子写**（同目录临时文件 + rename）。字节与无插件宿主逐字节一致，
+  只是不再可能留下半截 JSON。
+- **桥的选择不再缓存整个生命周期。** `/api/review.page` 每请求按 mtime 重新解析；否则改了
+  library 源里的桥，页面内联的仍是发布副本直到重启，而 `review_open` 的预检（每次重解析）
+  会看到新桥并报"准备好了" —— 两边说的不是同一份文件。
+- **asset 改成流式送出**，不再把整个文件读进宿主内存。
+- **客户端：** 轮询改为 `setTimeout` 链（不叠请求）、跟随宿主 `pollMs`、窗口隐藏时跳过；
+  `init.host.version` 改由宿主从 `package.json` 读（不再写死 `0.3.0`）；同源帧的
+  `postMessage` 用具体 origin 而不是 `'*'`；`accepted-unverified` 显示为"已提交；无法核对送达"；
+  状态行加 `aria-live`；guide / 空态文案去掉内部术语。
+- **契约版本不匹配进 warnings**：`contract_version` 不是 `review-surface/2.0.0` 时
+  `review_open` 明说（不拒绝 —— 手改过的面该能打开，但绝不该安静）。
+- **审阅标签绑回它自己的对话（修 BUG）。** 症状：在对话 A 里开的 PPT 审阅，弹到了当前正在看的
+  对话 B 的侧栏。根因：放置走的是全局 `ctx.sidebarRight.openTab`，它**只作用于屏幕上那个对话**；
+  而 A 的轮询器是常驻的，于是 A 的新面被写进了 B 的布局，还顺手展开了 B 的右栏。现在：
+  - 放置优先用该标签自己的 `tab.actions.openTab`（DSH 的 per-tab 路径，落在标签所在对话）；
+  - 只有「这个面自己的对话在屏幕上」时才允许用全局控制器，也**只有这时才展开右栏**；
+  - 既没有本对话的放置器、对话又不在屏幕上时，面**停在待放置队列**，等切回该对话（或该对话的
+    标签重新挂载）再放 —— 宁可不弹，也不弹错对话；
+  - 已经放过的面不再开第二个标签（同一份面只有 revision 变化，由 store 重键帧）；人关掉标签后
+    用布局里的审阅标签数变少来发现，允许下一次 `review_open` 重新放回来；如果标签还在但帧没挂载
+    （侧栏收起/对话未绘制），`review_open` 只展开右栏、不再开第二个标签；
+  - 旧版本已经错放进错误对话、或被持久化布局带过来的标签：帧发现 params 里的对话与标签所在对话
+    不一致时**拒绝渲染**，只显示「这份审阅属于另一个对话」。
+- **测试 33 → 58 条**：wake 五态 × 两代 API、无读口、`prompt` 缺失；上传上限四条；桥的三种
+  注入形态 + 缺注入点 + contract warning；模型发现段的注册/卸载/无服务；对话绑定五条（放置走
+  标签自己的 actions、展开闸门、待放置与关闭对账、已放置但帧未挂载时只展开不重开、错放标签拒渲染）。
+- **已验（重启后，真实会话 self-test）**：system prompt 段进了下一轮请求；`review_open`/`/api/review.surface`
+  的 host 是 0.3.1；页面经 `/api/review.page` 加载、桥连上；`write` 落盘字节与 draft 通道；第一次
+  `wake` → `200 queued`（inbox 核验）；**同一次提交重发 → `409 duplicate`，`verified.where:
+  "session log: user/message"`、`seq: 1827 < before: 1845`**（真实 `state`/`events` 日志读口）。
+- **未验**：后台对话的双对话绑定演练、上传 413 的 live、错放标签提示与 `accepted-unverified` 的
+  live 显示 —— 本文不把源码契约当成这些已经成立。
+
 ## 0.3.0 — 2026-10-21
 
 **一份审阅面 = 一个标签页。** 0.2.x 的侧栏每个对话只有一个「当前面」：`review_open` 是

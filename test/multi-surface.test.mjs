@@ -56,16 +56,30 @@ test('only one poller runs per conversation', () => {
 })
 
 test('a closed tab is not reopened by a plain poll', () => {
+  // Placement happens only in the revision-changed branch: a plain poll (same
+  // revision, changedSeq unchanged or stepped) never revives a closed tab. The
+  // second half of that rule is in `ensurePlaced`: a surface that already has a
+  // tab in this conversation's layout is not opened again.
   assert.match(
     source,
-    /if \(\(state\.claimed\.get\(surface\) \|\| 0\) === 0 && state\.unbound === 0\)/,
+    /if \(seen === undefined \|\| seen\.revision !== revision\) \{[\s\S]{0,900}?ensurePlaced\(host, sessionId, state, surface, revision\)/,
     '只有 revision 变了才补开；人手动关掉的标签必须保持关闭',
+  )
+  assert.match(
+    source,
+    /if \(state\.placed\.has\(surface\)\) \{[\s\S]{0,800}?\n\s*return\n/,
+    '已经在这个对话布局里的面不再开第二个标签',
+  )
+  assert.match(
+    source,
+    /reviewTabs < state\.reviewTabs\) state\.placed\.clear\(\)/,
+    '人关掉标签后必须忘掉「已放置」，否则 Agent 再开时补不回来',
   )
 })
 
 test('an empty hand-opened tab is used before a new tab is opened', () => {
   assert.match(source, /function registerUnbound\(sessionId\)/, '空标签必须登记，否则轮询会为同一份面再开一个标签')
-  assert.match(source, /state\.unbound === 0/, '有空标签时轮询不得再开新标签（同一份面会显示两次）')
+  assert.match(source, /if \(state\.unbound > 0\) return/, '有空标签时轮询不得再开新标签（同一份面会显示两次）')
 })
 
 test('the tab chip says which surface it is', () => {
