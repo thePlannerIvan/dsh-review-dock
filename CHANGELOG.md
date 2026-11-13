@@ -1,3 +1,11 @@
+## 0.3.4 — 2026-11-13
+
+**让模型知道"产物已经是 HTML"时不必手写页面。**
+
+system prompt 与 `review_open` 的描述都加了一句：产物本身就是 HTML 文件时，跑
+`planners-review-core` 的 `scripts/open-artifact.mjs --entry <产物.html>` —— 它把 surface
+写在产物旁边并开 `annotate`，人可以直接改字、点选、框选。提示仍然只指名 Skill、不复述契约。
+
 ## 0.3.3 — 2026-11-13
 
 **同一份产物被两个面打开时，`review_open` 出声。**
