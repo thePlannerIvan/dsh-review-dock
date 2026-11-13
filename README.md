@@ -148,6 +148,8 @@ if (hasPromptRequest(agent, request.requestId)) return { accepted: true }   // �
 
 协议（含"后写的别覆盖先写的"四条规则）在 `planners-review-core` 的 `references/annotate.md`；这个仓库只负责注入与传输，不解释批注内容。
 
+同一份产物被**两个面**打开时，`review_open` 会在 `warnings` 里指名那一份 —— 宿主不做锁，但绝不让"后者覆盖前者"静默发生。
+
 ### `capabilities` 的含义：宿主支持 ∩ surface 声明
 
 `init` 里的 `capabilities` 是**"这个面现在真正能用的"**，不是 surface 声明了什么，也不是宿主支持什么 —— 是两者的交集。**广告一个做不到的能力，等于让页面摆出一个必然失败的控件。**
