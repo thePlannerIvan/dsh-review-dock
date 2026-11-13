@@ -21,6 +21,11 @@
 
 插件把它挂进侧栏、把页面显示出来、把页面要的字节递过去、把结果落盘并唤醒模型。**审什么、能下什么决定、怎么绑版本，全是页面自己的事。**
 
+两种面都支持：
+
+- **页面自己画的审阅面**（内容审阅、逐页稿、PPT 工作台）；
+- **产物本身就是页面**：surface 里写 `"annotate": true`，宿主把公共件的批注层内联进去 —— 人在产物上直接改字、点选元素、框选区域、选中一句话。**页面不用改一行，连注入点都可以没有**（没有就补在 `</body>` 前）。
+
 ```text
 Agent 产出 → review_open 打开审阅页 → 人在页面上审、写意见、下决定
           → 桥把决定交给宿主 → 落进 surface 声明的反馈文件 → 唤醒 Agent
@@ -31,7 +36,7 @@ Agent 产出 → review_open 打开审阅页 → 人在页面上审、写意见�
 
 ## 模型怎么知道该用它（这条缝的另一半）
 
-光有工具表还不够：模型得在**决定怎么干活之前**就知道"需要人反馈的任务可以放进侧栏"。插件因此注册一段很短的 system prompt（`tool:review_open`，order 2950，每轮都在）：任务需要人审阅、判断、修改、选择或批准时，做 `review-surface.json` + 自己的审阅页（裸 `{{REVIEW_BRIDGE}}` 注入点），跑 `planners-review-core` 的校验器，再调 `review_open`；**打开不等于同意，等提交那条消息再动手**。
+光有工具表还不够：模型得在**决定怎么干活之前**就知道"需要人反馈的任务可以放进侧栏"。插件因此注册一段很短的 system prompt（`tool:review_open`，order 2950，每轮都在）：任务需要人审阅、判断、修改、选择或批准时，做 `review-surface.json` + 自己的审阅页（可以留裸 `{{REVIEW_BRIDGE}}` 注入点，不留宿主也会补），跑 `planners-review-core` 的校验器，再调 `review_open`；产物本身就是 HTML 时写 `"annotate": true`，人能直接在上面改字与圈选；**打开不等于同意，等提交那条消息再动手**。
 
 这段提示刻意**不复制契约**，只指名 `planners-review-core` 是权威 —— 契约只有一份，提示里再写一份就会漂移。它声明 `interpolate: false`：提示文本默认会被当成模板插值，而 `{{REVIEW_BRIDGE}}` 会被读成变量引用 —— 不关掉，标记要么消失、要么让**每一轮请求**的提示组装失败。`review_open` 的工具描述也写着同一个触发条件，所以即便提示服务不可用，工具本身仍然在教模型什么时候用它。
 
@@ -127,6 +132,21 @@ if (hasPromptRequest(agent, request.requestId)) return { accepted: true }   // �
 **⑤ 不要指望 `updateQueue` 兜底。** 它只能编辑/撤回/steer **还在队列里**的条目（`edit` 仅文本、`remove` 撤回、`steer` 仅当目标在 `next-turn` 且 agent 正在跑），对**已经被去重掉的**消息和**躺在队里没人取**的消息都无能为力。
 
 **⑥ 一条量到的限度（不要读成"队列可能永远没人取"）**：**在回合失败的路径上**观察到队列不会被自动排空 —— 一条已入队的消息在队列里躺了 64 秒，直到下一次 prompt 才被顺路取走（`wakeDriver` 在 `dsh-agent-loop` 之外没有调用者）。而 `turn` 结束时 `if (!this.inbox.hasPending) return false`（`dsh-agent-loop/lib/index.js:1014`）在**健康回合**结束后会再开一个回合，所以健康路径的行为**未测**。
+
+### 产物批注层（`annotate: true`）
+
+```json
+{ "annotate": true }
+```
+
+宿主把 `planners-review-core/assets/annotate/annotate.js`（单文件、shadow DOM、无依赖）**内联**进入口 HTML：
+
+- 页面可以留一个裸的 `{{REVIEW_ANNOTATE}}` 独占一行指定位置；**不留就追加在 `</body>` 前** —— 一份普通 HTML 产物因此不用改就能被审；
+- 与桥同一个理由只能内联：不透明帧里 `/api` 下的 `<script src>` 会被信任围栏打回 403；
+- 缺 `{{REVIEW_BRIDGE}}` 的页面**不再 409**，桥同样补在 `</body>` 前（校验器只报 `bridge_placeholder_absent` 警告）；
+- 批注层产出 `artifact-annotations/1`，走同一个 `feedback` / `draft` / `wake`；带 `base.version`（产物 meta 里自报）与 `bundle_id`，未提交的改动还能通过 `draftRead()` 读回。
+
+协议（含"后写的别覆盖先写的"四条规则）在 `planners-review-core` 的 `references/annotate.md`；这个仓库只负责注入与传输，不解释批注内容。
 
 ### `capabilities` 的含义：宿主支持 ∩ surface 声明
 

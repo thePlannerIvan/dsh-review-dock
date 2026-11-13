@@ -1,3 +1,13 @@
+## 0.3.2 — 2026-11-13
+
+**给普通 HTML 产物加一层批注；顺带把"必须有注入点"这条硬门槛拆了。**
+
+- **`annotate: true`**：宿主动把 `planners-review-core/assets/annotate/annotate.js` 内联进入口页（页面可留裸 `{{REVIEW_ANNOTATE}}`，不留就补在 `</body>` 前）。人在产物上直接改正文、点选元素、框选区域、选中一句话；产出 `artifact-annotations/1`，走同一个 `feedback` / `draft` / `wake`。产物不需要任何改动 —— 连注入点都可以没有。
+- **缺 `{{REVIEW_BRIDGE}}` 不再 409**：桥同样补在 `</body>` 前。原来的理由是"不给一个永远连不上宿主的页面"，而自动补齐之后那个前提不成立了。校验器相应把错误降成 `bridge_placeholder_absent` 警告（老版本宿主仍会拒绝）。
+- **草稿能读回**：新增 `GET /api/review/draft` 与桥的 `draftRead()`（`BRIDGE_API` 同步加名）。刷新、切标签、产物被重新生成之后，未提交的批注能回到页面；页面按 `base.version` 判断是不是同一版，不同就问人，不静默丢。
+- **注入助手统一**：三种注入点写法（裸标记 / `<script src>` / `<script>`）与"没有注入点"走同一个 `injectScript`；桥永远在批注层之前，批注层排在前面会一直等不到桥。
+- **测试**：`bridge-injection` 从"缺注入点必须 409"改成"补齐且只有一个完整 script"，新增 `annotate:true` 两条（有无 `{{REVIEW_ANNOTATE}}`）；全量 61 条。
+
 ## 0.3.1 — 2026-11-08
 
 **DSH 0.2.2 升级后，唤醒核验静默失效；顺带把"模型不知道有这个面"补上。** 这一版没有改
