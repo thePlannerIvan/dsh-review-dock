@@ -32,7 +32,7 @@
 
 ## 3. HTTP 接口清单
 
-全部十条路由均挂在 DSH Connection 的 `/api` 认证栅栏之下：**无有效浏览器会话 cookie 一律返回 401**（与未注册路径行为一致，验路由在不在必须带 cookie 对照 `/api/review.nonexistent` 回 404）。
+全部十一条路由均挂在 DSH Connection 的 `/api` 认证栅栏之下：**无有效浏览器会话 cookie 一律返回 401**（与未注册路径行为一致，验路由在不在必须带 cookie 对照 `/api/review.nonexistent` 回 404）。
 
 | 方法与路径 | 用途 | 关键校验与约束 |
 | --- | --- | --- |
@@ -44,9 +44,9 @@
 | `GET /api/review.asset?surface=<abs>&rel=<path>` | 流式读取 `surface.dir` 内单文件 | realpath 包含性校验防符号链接逃逸，拒绝越界 403 |
 | `GET/POST /api/review.draft` | 读回或原样写入未提交草稿（`GET` 支持页面刷新/重生成后恢复未提交改动） | 读与写都要求 `capabilities` 声明 `draft`（否则 403，并说清是哪一条没声明）；写还要求 surface 声明 `draft` 文件（否则 409）；路径经 `lib/paths.js` 围栏检查，原子写落盘；无草稿内容时读回 `{ draft: null }` |
 | `POST /api/review.write` | `{ surface, payload, sessionId }` 原样写回 `feedback` 文件 | 无信封、换行与格式与无插件宿主逐字节一致 |
-| `POST /api/review.command` | 可选命令通道 | 仅 surface 声明 `command` 能力时开放 |
+| `POST /api/review.command` | 可选命令通道 | 仅 surface 声明 `command` 能力、且核心认可该后端时开放（否则 403，回执区分「没声明」与「宿主做不到」；核心的 runner 只挡后端、作者与操作，不知道这份面声明了什么） |
 | `POST /api/review.wake` | `{ surface, unit, text, sessionId }` 提交唤醒消息 | 页面有传 `text` 时覆盖模板 `{unit}`；无 `sessionId` 直接 `ok: false` |
-| `POST /api/review.upload?surface=<abs>&rel=<path>` | 流式写盘原始二进制附件至 `dir` 相对路径 | 要求 `asset-upload` 能力可用（否则 403，回执区分「没声明」与「宿主做不到」）；采用 `requestBody: 'streaming'` 边读边计数超 **16 MiB** 立刻 `cancel()` 回 413；目标已为软链或最近存在祖先落出 `dir` 均拒 403 |
+| `POST /api/review.upload?surface=<abs>&rel=<path>` | 流式写盘原始二进制附件至 `dir` 相对路径 | 要求 `asset-upload` 能力可用（否则 403，回执区分「没声明」与「宿主做不到」）；采用 `requestBody: 'streaming'` 边读边计数超 **16 MiB** 立刻 `cancel()` 回 413；目标越界或经过符号链接回 403，落点解析不出来回 404（与写入口共用 `statusForReason()`） |
 
 ### 3.1 `capabilities` 交集原则
 
@@ -60,7 +60,9 @@
 
 - `upload`：`asset-upload` 不可用时 403；回执区分「surface 没声明」与「宿主当前做不到」。
 - `draft` 读与写：`draft` 不可用时 403，回执同样说清是哪一条没声明；写还要求 surface 声明 `draft` 文件（否则 409）。读在没有草稿内容时返回 `{ draft: null }`，与无插件宿主一致。
+- `command`：`command` 不可用（没声明、桥没有这一行、或核心不认可该后端）时 403，回执同样区分原因；准入在调核心的 runner 之前。
 - 桥缺少「必须」动作：页面拒绝加载，回执列出缺哪些；缺少可选动作（`draft` / `draftRead` / `command` / `upload`）只让对应能力不亮，页面照常打开，`review_open` 的 `warnings` 说明原因。
+- `draft` 能力由 `draft` 这一个动作撑起；`draftRead` 缺席只让读回不可用，不会把草稿写入一起关掉 —— 「能不能存」与「能不能读回」是两件事，一份 0.3.x 的桥必须还能让人存下写过的字。
 
 ### 3.2 动作声明表
 
@@ -99,17 +101,19 @@
 
 ### 5.1 侧栏状态机（0.4.0 第二批）
 
-标签归属不再藏在 React 闭包里：`lib/client.js` 导出一个普通对象 `createPanel({ host })`，只暴露三个动作。它不碰 `window`、`document`、React，宿主（侧栏那层）把「屏幕上是哪个对话、布局里有哪些标签、哪些标签挂着」作为适配器交进来；界面只渲染、挂监听、把消息转进去。
+标签归属不再藏在 React 闭包里：`lib/client.js` 导出一个普通对象 `createPanel({ host, fetch, endpoint, now })`。它不碰 `window`、`document`、React；宿主（侧栏那层）把「屏幕上是哪个对话、布局里有哪些标签、哪些标签挂着」作为适配器交进来；`fetch` / `endpoint` / `now` 留了口子，缺省分别回落到 `globalThis.fetch` / `globalThis.location.href` / `Date.now`。它给出**三个决策动作**（下表）**加若干只读渲染读取**（`revision` / `title` / `changedSeq` / `latest` / `subscribe` / `surfaceForTab` / `problems`）—— 后面的那些只报告动作决定了什么，自己不做决定。界面只渲染、挂监听、把消息转进去。
 
 | 动作 | 入参 | 回执 |
 | --- | --- | --- |
-| `observe(sessionId, answer)` 看一次清单 | 一次 `GET /api/review.current` 的应答 | `{ placed, held, waiting, failed, poked, layout, pollMs }`：`waiting` 是「还没轮到」，`failed` 是「试过并失败」，原因同时留在 `problems()` |
+| `observe(sessionId, answer)` 看一次清单 | 一次 `GET /api/review.current` 的应答；拿不到清单时传 `{ error }` | `{ placed, held, waiting, failed, poked, layout, pollMs }`：`waiting` 是「还没轮到」，`failed` 是「试过并失败」，原因同时留在 `problems()` |
 | `place({ sessionId, surface, revision })` 放一个标签 | 哪份面、哪个对话、第几版 | `{ status: 'opened', via: 'tab'\|'screen' }`、`{ status: 'already', mounted }`、`{ status: 'waiting', reason }`、`{ status: 'failed', reason }` |
 | `relay({ sessionId, surface, method, payload })` 转交一次请求 | 桥的一次调用 | `{ value, note? }`；拒绝时抛错，取不到动作表时点名「宿主没有提供动作表——可能是一份旧副本在应答」 |
 
 「这是哪个对话」只有一套推导（同一文件导出的 `conversationOf()` / `isMisfiled()`），界面层与状态机读同一个答案。人关掉标签不再由「标签数变少」一个信号独判：探针抛错 = 不知道，布局为空 = 真没有，挂载中的标签 = 它还在；只有「剩下的标签都认得出来」时，没挂载的放置记录才算过期。放置失败会留下原因，不会被当成「这个对话还没轮到」。
 
-行为检查在 `test/panel-placement.test.mjs`、`test/panel-render-state.test.mjs`、`test/panel-relay.test.mjs`、`test/client-registration.test.mjs`，真浏览器验收在 `test/browser/panel-conversations.browser.mjs`（A 开面、切到 B 看不见、切回 A 还在）。
+失败要走到人眼前：外壳在帧底下只有一行字，由 `statusLine()` 决定 —— 有放置失败或轮询失败时写「放置失败：<原因>」/「轮询失败：<原因>」（多条用「；」连成一行），没有失败时一个字都不说（不加「正常 / 已连接」这类状态装饰）。轮询拿不到清单（连不上、非 2xx、不是 JSON）走 `observe(sessionId, { error })` 同一条路，下一次拿到清单就清掉那行。
+
+行为检查在 `test/panel-placement.test.mjs`、`test/panel-render-state.test.mjs`、`test/panel-status-line.test.mjs`、`test/panel-relay.test.mjs`、`test/client-registration.test.mjs`，真浏览器验收在 `test/browser/panel-conversations.browser.mjs`（A 开面、切到 B 看不见、切回 A 还在）与 `test/browser/shell-controls.browser.mjs`（外壳渲染出的 DOM 里没有任何控件、更没有保存按钮；放置失败留一行原因）。
 
 ---
 
@@ -125,5 +129,5 @@ dsh web --dump-config | grep -A 2 review-dock
 - 实测环境记录（详情与边界见 [CHANGELOG.md](CHANGELOG.md)）：
   - **DSH `0.1.7-rc.2` / `0.2.0-rc.2` / `0.2.1-rc.1`**：隔离 `DSH_HOME` + Chromium 147 Playwright 全链路实测（桥连通、资产 blob URL、16 MiB/无能力 403、符号链真实路径、`read`/`readText`、`review/changed` 单次戳、安装与卸载对账）。
   - **DSH `0.2.2` + 桌面应用 `0.3.1`**：真机重启验证 system prompt 注入、`write`、`wake 200 queued`、重发 `409 duplicate`（真实 `state/events` 日志）与双面各自独立标签。
-  - **本地测试基线（0.4.0 第二批）**：`npm test` 116 条检查（含 `action-table`、`relay`、`draft-read`、`capabilities`、`path-fence`、`browser-acceptance` 等）。真浏览器验收需要 Playwright 与 `planners-review-core`；缺任一项时该条显式 skip 并说明原因。
+  - **本地测试基线（0.4.0）**：`npm test` 123 条检查（含 `action-table`、`relay`、`draft-read`、`capabilities`、`path-fence`、`browser-acceptance` 等）。真浏览器验收需要 Playwright 与 `planners-review-core`；缺任一项时该条显式 skip 并说明原因。
   - **尚未在真机/线上单独跑过的项**：`github:thePlannerIvan/dsh-review-dock` git 短地址直装、`.tgz` 安装包安装、多会话后台同时触发双对话真机演练、上传超限实时 413 与 `accepted-unverified` 运行时缺失真机演示。
