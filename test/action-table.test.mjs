@@ -8,7 +8,7 @@
  * 一遍页面请求，转交是真的把一行交给 client 的 relay 跑一次。
  */
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -141,7 +141,7 @@ test('the bridge list is exactly the table: dropping any action from a complete 
   }
 })
 
-test('an optional action that is missing only takes its capability away', async (t) => {
+test('一份能写草稿但没有 draftRead 的桥：存得下，读回才降级', async (t) => {
   const core = await fakeCore(t, ALL_BRIDGE_NAMES.filter((name) => name !== 'draftRead'))
   const f = await mount(t, {
     coreDir: core,
@@ -149,5 +149,20 @@ test('an optional action that is missing only takes its capability away', async 
   })
   assert.equal((await get(f, '/api/review.page', { surface: f.surface })).status, 200)
   const meta = await (await get(f, '/api/review.surface', { surface: f.surface })).json()
-  assert.deepEqual(meta.surface.capabilities, ['asset-upload'], '缺 draftRead 时 draft 不该还亮着')
+  // 「能不能存」与「能不能读回」是两件事：一份 0.3.x 的桥能写草稿，人写的东西就
+  // 必须存得下来 —— 不能因为读回那个动作缺席，把存也一起关掉。
+  assert.deepEqual(meta.surface.capabilities, ['draft', 'asset-upload'])
+
+  const draftRoute = routeOf(f, '/api/review.draft')
+  const written = await draftRoute.fetch(new Request('http://dsh.local/api/review.draft', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ surface: f.surface, payload: { text: '还在写' } }),
+  }))
+  assert.equal(written.status, 200, '能写草稿的桥必须让存')
+  assert.deepEqual(JSON.parse(await readFile(join(f.reviewDir, 'draft.json'), 'utf8')), { text: '还在写' })
+
+  // 读回不可用这件事仍然要说出口：可选动作降级的警告照旧点名 draftRead。
+  const receipt = await f.tools[0].execute({ surface: f.surface }, { agent: { session: { id: 's1' } } })
+  assert.match(receipt.warnings.join(' '), /draftRead/)
 })

@@ -108,7 +108,9 @@ test('读草稿：面没声明 draft 能力就拒绝，并说清是哪一条', a
 })
 
 test('读草稿：声明了但这份桥不会说 draft，拒绝理由是宿主做不到', async (t) => {
-  const core = await fakeCore(t, ALL_BRIDGE_NAMES.filter((name) => name !== 'draftRead'))
+  // 让这份桥缺的是 `draft` 自己（它撑起能力），不是 `draftRead`：后者缺席只让
+  // 读回不可用，不会把存草稿也关掉（见 test/action-table.test.mjs 那条）。
+  const core = await fakeCore(t, ALL_BRIDGE_NAMES.filter((name) => name !== 'draft'))
   const f = await fixture(t, { coreDir: core })
   const response = await f.get()
   const body = await response.json()
