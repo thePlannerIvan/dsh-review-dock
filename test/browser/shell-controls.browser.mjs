@@ -189,7 +189,7 @@ function harness(surface) {
       const layouts = new Map([[${JSON.stringify(SESSION)}, []]])
       const seats = new Map()
       const registered = {}
-      let failing = ${'false'}
+      let failing = false
       const surface = ${JSON.stringify(surface)}
 
       function seatOf(sessionId) {
