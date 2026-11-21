@@ -15,6 +15,7 @@ import test from 'node:test'
 
 import { optionalBridgeApi, requiredBridgeApi } from '../lib/action-table.js'
 import { apply } from '../lib/index.js'
+import { fakeCordis } from './support/fake-cordis.mjs'
 
 const ALL_BRIDGE_NAMES = [...requiredBridgeApi(), ...optionalBridgeApi()]
 
@@ -46,21 +47,9 @@ async function fixture(t, { capabilities = ['draft'], draft = 'draft.json', core
     wake: { mode: 'queue', text: '{unit}' },
     capabilities,
   }))
-  const routes = []
-  const ctx = {
-    inject(_names, fn) {
-      fn({
-        connection: { fetch: { register(route) { routes.push(route); return () => {} } } },
-        effect: (run) => (run() ?? (() => {})),
-        logger: {},
-        get: () => undefined,
-      })
-    },
-    effect: (run) => (run() ?? (() => {})),
-    get: () => undefined,
-    logger: {},
-  }
-  apply(ctx, coreDir === '' ? {} : { reviewCoreDir: coreDir })
+  const plugin = fakeCordis()
+  apply(plugin.ctx, coreDir === '' ? {} : { reviewCoreDir: coreDir })
+  const { routes } = plugin
   return {
     root,
     reviewDir,

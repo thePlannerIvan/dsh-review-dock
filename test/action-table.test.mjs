@@ -15,6 +15,7 @@ import test from 'node:test'
 
 import { ACTIONS, RELAY_KINDS, optionalBridgeApi, requiredBridgeApi } from '../lib/action-table.js'
 import { apply } from '../lib/index.js'
+import { fakeCordis } from './support/fake-cordis.mjs'
 
 /** A minimal `planners-review-core` whose bridge mentions exactly `names`. */
 async function fakeCore(t, names) {
@@ -59,24 +60,9 @@ async function mount(t, { coreDir = '', surface: extra = {} } = {}) {
     capabilities: [],
     ...extra,
   }))
-  const routes = []
-  const tools = []
-  const services = { tools: { register(definition) { tools.push(definition); return () => {} } } }
-  const get = (name) => services[name]
-  const bridgeCtx = {
-    connection: { fetch: { register(route) { routes.push(route); return () => {} } } },
-    effect: (run) => (run() ?? (() => {})),
-    logger: {},
-    get,
-  }
-  const ctx = {
-    inject(_names, fn) { fn(bridgeCtx) },
-    effect: (run) => (run() ?? (() => {})),
-    get,
-    logger: {},
-  }
-  apply(ctx, coreDir === '' ? {} : { reviewCoreDir: coreDir })
-  return { root, reviewDir, surface, routes, tools }
+  const plugin = fakeCordis({ tools: true })
+  apply(plugin.ctx, coreDir === '' ? {} : { reviewCoreDir: coreDir })
+  return { root, reviewDir, surface, routes: plugin.routes, tools: plugin.tools }
 }
 
 test('every action in the table has a host entry, registered with its own method and body mode', async (t) => {
