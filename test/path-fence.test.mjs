@@ -64,6 +64,14 @@ test('能不能写：越界与指向外面的符号链接都拒绝，理由分�
   assert.deepEqual(await canWrite(dir, 'linked.txt'), { ok: false, reason: 'symlink' })
 })
 
+test('能不能写：根自己经过符号链接不算越界（0.2.4：/tmp 与网盘上的工程）', async (t) => {
+  const { root, dir } = await project(t)
+  await symlink(dir, join(root, 'alias'), 'dir')
+  const result = await canWrite(join(root, 'alias'), 'notes/draft.json')
+  assert.equal(result.ok, true, '围栏根是一条软链，不是越界')
+  assert.equal(result.target, join(await realpath(dir), 'notes', 'draft.json'), '落点仍然是真实路径')
+})
+
 test('能不能写：绝对目标同样受围栏管，调用方不用自己比前缀', async (t) => {
   const { dir, root } = await project(t)
   const inside = await canWrite(dir, join(dir, 'notes', 'draft.json'))

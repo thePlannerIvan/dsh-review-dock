@@ -314,3 +314,25 @@ test('a responder older than 0.3.1 answers without a host block; the line still 
   assert.match(line, /比它新/)
   assert.match(line, /11\/11/)
 })
+
+test('a registration failure that has nothing to do with a second copy is not called a duplicate', async () => {
+  const runtime = fakeRuntime()
+  // 只有「已被注册」那一类才是第二份副本的证据。别的失败（这里：路由表满了）
+  // 与副本无关，照实说 —— 不然人照着「重复的 N 条入口」去找第二份，永远找不到。
+  const register = runtime.connection.fetch.register
+  runtime.connection.fetch.register = (route) => {
+    if (route.path === '/api/review.surface') throw new Error('connection: route table is full')
+    return register(route)
+  }
+
+  const copy = mountCopy(runtime)
+  await settle(() => copy.warn.length > 0, '注册失败的启动日志')
+
+  assert.equal(copy.warn.length, 1, `只写一行：${JSON.stringify(copy.warn)}`)
+  const line = copy.warn[0]
+  assert.match(line, /review\.surface/, '哪一条没挂上要指名')
+  assert.match(line, /route table is full/, '原因要照实说，不能吞掉')
+  assert.equal(/重复/.test(line), false, '与副本无关的失败不许说成「重复入口」')
+  assert.equal(copy.info.some((entry) => entry.includes('registered')), false, '少了一条入口就不能写「已注册」')
+  assert.equal(runtime.routes.size, ROUTE_PATHS.length - 1, '其余入口照常挂上')
+})

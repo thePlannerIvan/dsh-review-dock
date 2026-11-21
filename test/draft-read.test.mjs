@@ -15,6 +15,7 @@ import test from 'node:test'
 
 import { optionalBridgeApi, requiredBridgeApi } from '../lib/action-table.js'
 import { apply } from '../lib/index.js'
+import { fakeCordis } from './support/fake-cordis.mjs'
 
 const ALL_BRIDGE_NAMES = [...requiredBridgeApi(), ...optionalBridgeApi()]
 
@@ -46,21 +47,9 @@ async function fixture(t, { capabilities = ['draft'], draft = 'draft.json', core
     wake: { mode: 'queue', text: '{unit}' },
     capabilities,
   }))
-  const routes = []
-  const ctx = {
-    inject(_names, fn) {
-      fn({
-        connection: { fetch: { register(route) { routes.push(route); return () => {} } } },
-        effect: (run) => (run() ?? (() => {})),
-        logger: {},
-        get: () => undefined,
-      })
-    },
-    effect: (run) => (run() ?? (() => {})),
-    get: () => undefined,
-    logger: {},
-  }
-  apply(ctx, coreDir === '' ? {} : { reviewCoreDir: coreDir })
+  const plugin = fakeCordis()
+  apply(plugin.ctx, coreDir === '' ? {} : { reviewCoreDir: coreDir })
+  const { routes } = plugin
   return {
     root,
     reviewDir,
@@ -108,7 +97,9 @@ test('读草稿：面没声明 draft 能力就拒绝，并说清是哪一条', a
 })
 
 test('读草稿：声明了但这份桥不会说 draft，拒绝理由是宿主做不到', async (t) => {
-  const core = await fakeCore(t, ALL_BRIDGE_NAMES.filter((name) => name !== 'draftRead'))
+  // 让这份桥缺的是 `draft` 自己（它撑起能力），不是 `draftRead`：后者缺席只让
+  // 读回不可用，不会把存草稿也关掉（见 test/action-table.test.mjs 那条）。
+  const core = await fakeCore(t, ALL_BRIDGE_NAMES.filter((name) => name !== 'draft'))
   const f = await fixture(t, { coreDir: core })
   const response = await f.get()
   const body = await response.json()

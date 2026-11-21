@@ -8,35 +8,10 @@
  * 缺 Playwright 或缺 planners-review-core 时跳过并说明原因，不伪造通过。
  */
 import assert from 'node:assert/strict'
-import { existsSync } from 'node:fs'
-import { homedir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
 import test from 'node:test'
-import { fileURLToPath } from 'node:url'
 
-import { loadPlaywright, run } from './browser/draft-reload.browser.mjs'
-
-const here = dirname(fileURLToPath(import.meta.url))
-
-/** The same search the plugin does, narrowed to the copies a test can rely on. */
-function coreDir() {
-  const candidates = [
-    process.env.DSH_REVIEW_CORE_DIR,
-    join(homedir(), '.dsh', 'skills', 'planners-review-core'),
-    join(homedir(), '.claude', 'skills', 'planners-review-core'),
-    join(homedir(), '.codex', 'skills', 'planners-review-core'),
-    resolve(here, '../../../02-skills-library/00-system/planners-review-core'),
-  ].filter((value) => typeof value === 'string' && value !== '')
-  return candidates.find((dir) => existsSync(join(dir, 'assets', 'review-bridge.js'))) ?? ''
-}
-
-const core = coreDir()
-const { playwright, error } = loadPlaywright()
-const skip = core === ''
-  ? 'requires planners-review-core (set DSH_REVIEW_CORE_DIR)'
-  : playwright === undefined
-    ? error
-    : false
+import { run } from './browser/draft-reload.browser.mjs'
+import { core, skip } from './support/browser-core.mjs'
 
 test('侧栏里写字、刷新，字还在（真浏览器）', { skip, timeout: 120000 }, async () => {
   // Pin the core this test was skipped-checked against, so the mount and this

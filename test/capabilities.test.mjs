@@ -14,6 +14,7 @@ import test from 'node:test'
 
 import { optionalBridgeApi, requiredBridgeApi } from '../lib/action-table.js'
 import { apply } from '../lib/index.js'
+import { fakeCordis } from './support/fake-cordis.mjs'
 
 const ALL_BRIDGE_NAMES = [...requiredBridgeApi(), ...optionalBridgeApi()]
 
@@ -66,30 +67,15 @@ async function fixture(t, { core, capabilities, backend }) {
     capabilities,
     ...(backend === undefined ? {} : { command_backend: backend }),
   }))
-  const routes = []
-  const tools = []
-  const services = { tools: { register(definition) { tools.push(definition); return () => {} } } }
-  const get = (name) => services[name]
-  const bridgeCtx = {
-    connection: { fetch: { register(route) { routes.push(route); return () => {} } } },
-    effect: (run) => (run() ?? (() => {})),
-    logger: {},
-    get,
-  }
-  const ctx = {
-    inject(_names, fn) { fn(bridgeCtx) },
-    effect: (run) => (run() ?? (() => {})),
-    get,
-    logger: {},
-  }
-  apply(ctx, { reviewCoreDir: core.root })
+  const plugin = fakeCordis({ tools: true })
+  apply(plugin.ctx, { reviewCoreDir: core.root })
   const meta = async () => {
     const url = new URL('http://dsh.local/api/review.surface')
     url.searchParams.set('surface', surface)
-    const route = routes.find((entry) => entry.path === '/api/review.surface')
+    const route = plugin.routes.find((entry) => entry.path === '/api/review.surface')
     return (await (await route.fetch(new Request(url))).json()).surface
   }
-  return { root, reviewDir, surface, routes, tools, meta }
+  return { root, reviewDir, surface, routes: plugin.routes, tools: plugin.tools, meta }
 }
 
 test('a backend only the core knows about is advertised, because the plugin has no list', async (t) => {
