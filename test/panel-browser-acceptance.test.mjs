@@ -75,6 +75,16 @@ test('A 对话开面、切到 B 看不见、切回 A 还在（真浏览器）', 
     evidence.afterReturn.frames.filter((frame) => frame.sessionId === 'session-A').length,
     1,
   )
+  assert.match(
+    evidence.tableFailure,
+    /宿主没有提供动作表——可能是一份旧副本在应答/,
+    '取不到动作表时，页面必须看到点名原因',
+  )
+  assert.doesNotMatch(
+    evidence.tableFailure,
+    /未知的桥方法/,
+    '不能把宿主没有动作表说成桥的问题',
+  )
   assert.deepEqual(evidence.consoleErrors, [], '页面与控制台不该有错误')
   assert.equal(evidence.feedbackExists, false, '这次验收没有提交，feedback 文件不该出现')
 })

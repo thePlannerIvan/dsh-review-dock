@@ -231,6 +231,14 @@ test('空标签认领了较早的一份面之后，后来交接的仍能开出�
   assert.equal(fake.opened[0].options.params.surface, B)
 })
 
+test('宿主没有标签清单入口时，布局是「不知道」，不是 0', () => {
+  const panel = createPanel({ host: { onScreen: () => 'conversation-A' } })
+  const receipt = panel.observe('conversation-A', answer([]))
+  assert.equal(receipt.layout.known, false)
+  assert.match(receipt.layout.reason, /标签清单/)
+  assert.ok(panel.problems().some((entry) => entry.kind === 'layout'))
+})
+
 test('刚放上去的面有一段宽限：布局还没来得及反映时不算被关掉', () => {
   const fake = createFakeHost({ onScreen: 'conversation-A' })
   let clock = 0

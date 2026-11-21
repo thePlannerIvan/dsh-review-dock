@@ -125,5 +125,5 @@ dsh web --dump-config | grep -A 2 review-dock
 - 实测环境记录（详情与边界见 [CHANGELOG.md](CHANGELOG.md)）：
   - **DSH `0.1.7-rc.2` / `0.2.0-rc.2` / `0.2.1-rc.1`**：隔离 `DSH_HOME` + Chromium 147 Playwright 全链路实测（桥连通、资产 blob URL、16 MiB/无能力 403、符号链真实路径、`read`/`readText`、`review/changed` 单次戳、安装与卸载对账）。
   - **DSH `0.2.2` + 桌面应用 `0.3.1`**：真机重启验证 system prompt 注入、`write`、`wake 200 queued`、重发 `409 duplicate`（真实 `state/events` 日志）与双面各自独立标签。
-  - **本地测试基线（0.4.0 第二批）**：`npm test` 114 条检查（含 `action-table`、`relay`、`draft-read`、`capabilities`、`path-fence`、`browser-acceptance` 等）。真浏览器验收需要 Playwright 与 `planners-review-core`；缺任一项时该条显式 skip 并说明原因。
+  - **本地测试基线（0.4.0 第二批）**：`npm test` 115 条检查（含 `action-table`、`relay`、`draft-read`、`capabilities`、`path-fence`、`browser-acceptance` 等）。真浏览器验收需要 Playwright 与 `planners-review-core`；缺任一项时该条显式 skip 并说明原因。
   - **尚未在真机/线上单独跑过的项**：`github:thePlannerIvan/dsh-review-dock` git 短地址直装、`.tgz` 安装包安装、多会话后台同时触发双对话真机演练、上传超限实时 413 与 `accepted-unverified` 运行时缺失真机演示。

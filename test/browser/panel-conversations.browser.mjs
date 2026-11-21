@@ -123,10 +123,15 @@ function harness() {
         },
       }
 
+      // A copy of the plugin that predates /api/review.actions answers this one
+      // route with a failure; the page must hear WHY.
+      const noActions = new URLSearchParams(window.location.search).has('no-actions')
       const panel = client.createPanel({
         host,
         endpoint: (name) => new URL('api/' + name, window.location.href).href,
-        fetch: (url, init) => fetch(url, init),
+        fetch: (url, init) => (noActions && String(url).includes('/api/review.actions')
+          ? Promise.resolve({ ok: false, status: 503, json: async () => ({}) })
+          : fetch(url, init)),
       })
       panel.subscribe(render)
 
@@ -407,6 +412,21 @@ export async function run({ headless = true } = {}) {
     const receipts = await page.evaluate(() => window.__state().receipts)
     const feedbackExists = await readFile(feedbackFile, 'utf8').then(() => true).catch(() => false)
 
+    // Extra acceptance: with no action table, the PAGE must see the cause.
+    const tableConsoleErrors = []
+    const tablePage = await browser.newPage()
+    tablePage.on('console', (message) => {
+      if (message.type() === 'error') tableConsoleErrors.push(message.text())
+    })
+    tablePage.on('pageerror', (error) => tableConsoleErrors.push(String(error?.message ?? error)))
+    await tablePage.goto(origin + '/?no-actions=1', { waitUntil: 'load' })
+    const tableStatus = tablePage.frameLocator('#column-A iframe').locator('#status')
+    const tableFailure = await eventually('页面看到动作表失败的原因', async () => {
+      const text = await tableStatus.textContent()
+      return typeof text === 'string' && text.startsWith('failed:') ? text : null
+    })
+    await tablePage.close()
+
     return {
       beforeSwitch,
       afterSwitch,
@@ -419,6 +439,8 @@ export async function run({ headless = true } = {}) {
       bornBefore,
       bornAfter,
       receipts,
+      tableFailure,
+      tableConsoleErrors,
       consoleErrors,
       feedbackExists,
       opened: { ok: opened.ok, tab: opened.tab },
