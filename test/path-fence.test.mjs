@@ -35,6 +35,8 @@ test('能不能读：越界、缺文件、经过符号链接是三种不同的�
   const { dir, root } = await project(t)
   assert.deepEqual(await canRead(dir, '../outside/secret.txt'), { ok: false, reason: 'escape' })
   assert.deepEqual(await canRead(dir, 'nope.html'), { ok: false, reason: 'missing' })
+  // 读只按 dir 内的相对路径寻址；绝对路径即便落在围栏里也不是第二种入口。
+  assert.deepEqual(await canRead(dir, join(dir, 'page.html')), { ok: false, reason: 'escape' })
   await symlink(join(root, 'outside'), join(dir, 'leak'), 'dir')
   assert.deepEqual(await canRead(dir, 'leak/secret.txt'), { ok: false, reason: 'symlink' })
 })
