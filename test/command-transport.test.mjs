@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict'
 import { existsSync } from 'node:fs'
-import { readFile, rm } from 'node:fs/promises'
+import { rm } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import test from 'node:test'
+import { ACTIONS } from '../lib/action-table.js'
 import { handleReviewCommand, handleReviewSurface, apply } from '../lib/index.js'
 
 const thisDir = fileURLToPath(new URL('.', import.meta.url))
@@ -155,8 +156,12 @@ integrationTest('DSH registration uses exported command handler, not a model too
   assert.equal(revisionOf(afterReopen, f.surface), firstRevision + 1, '被再开的那一份 revision 走一格')
   assert.equal(revisionOf(afterReopen, g.surface), 1, '别的面的 revision 不受牵连')
   assert.equal((await current.fetch(new Request('http://dsh.local/api/review.current'))).status, 400)
-  const source = await readFile(new URL('../lib/client.js', import.meta.url), 'utf8')
-  assert.match(source, /method === 'command'/)
-  assert.match(source, /endpoint\('review.command'\)/)
-  assert.match(source, /JSON.stringify\(\{ surface, payload \}\)/)
+  // The relay is table-driven; its wiring for `command` is proven behaviourally
+  // in test/relay.test.mjs, which drives every row of the table through the real
+  // sidebar relay. Reading client.js for branch text was what let `draftRead`
+  // stay missing while three "checks" stayed green.
+  const commandAction = ACTIONS.find((action) => action.name === 'command')
+  assert.equal(commandAction.route, '/api/review.command')
+  assert.equal(commandAction.relay.method, 'POST')
+  assert.deepEqual(commandAction.relay.body, ['surface', 'payload'])
 })
