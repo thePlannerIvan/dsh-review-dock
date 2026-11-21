@@ -30,6 +30,7 @@ const ROUTE_PATHS = [
   '/api/review.surface',
   '/api/review.page',
   '/api/review.bridge',
+  '/api/review.actions',
   '/api/review.asset',
   '/api/review.write',
   '/api/review.draft',
@@ -159,7 +160,7 @@ async function settle(predicate, what, timeoutMs = 2000) {
 
 test('the second copy names who answers its routes, which version, and what it lost', async () => {
   const runtime = fakeRuntime()
-  // 盘上先有一份更旧的副本（比如 0.2.5），十个入口它都占着，而且会报版本。
+  // 盘上先有一份更旧的副本（比如 0.2.5），所有入口它都占着，而且会报版本。
   occupy(runtime, { name: 'dsh-review-dock', version: '0.2.5' })
 
   const copy = mountCopy(runtime)
@@ -173,7 +174,7 @@ test('the second copy names who answers its routes, which version, and what it l
   assert.match(line, /0\.2\.5/, '必须说出应答者报的版本')
   assert.match(line, new RegExp(escapeRegExp(OWN_VERSION)), '必须说出本副本的版本')
   assert.match(line, /比它新/, `应答者 0.2.5 比本副本 ${OWN_VERSION} 旧，必须说清`)
-  assert.match(line, /10\/10/, '必须说清有几条入口被对方拿走')
+  assert.match(line, /11\/11/, '必须说清有几条入口被对方拿走')
   assert.match(line, /review\.current/, '被跳过的入口要指名')
 
   const stillOld = await runtime.routes.get('/api/review.current').fetch(new Request('http://dsh.local/api/review.current?sessionId=s'))
@@ -190,7 +191,7 @@ test('a lone copy mounts quietly, with only the existing registered line', async
   assert.equal(copy.warn.length, 0, '只有一份副本时不该对账告警')
   assert.equal(copy.info.filter((line) => line.includes('registered')).length, 1, `“已注册”只写一行：${JSON.stringify(copy.info)}`)
   assert.equal(copy.info.some((line) => line.includes('启动对账')), false, '没人应答就不该有对账行')
-  assert.equal(runtime.routes.size, ROUTE_PATHS.length, '十个入口都要挂上')
+  assert.equal(runtime.routes.size, ROUTE_PATHS.length, '十一个入口都要挂上')
   assert.equal(copy.tools.length, 1, 'review_open 仍在')
 })
 
@@ -207,7 +208,7 @@ test('two copies at the same version: the second reports the peer and loses ever
   assert.match(line, /应答者是 dsh-review-dock/, '必须说出应答者是谁')
   assert.match(line, new RegExp(escapeRegExp(OWN_VERSION)), '必须说出应答者报的版本')
   assert.match(line, /同版/, '两份版本相同时要说“同版”')
-  assert.match(line, /10\/10/, '必须说清十条入口全被占着')
+  assert.match(line, /11\/11/, '必须说清十一条入口全被占着')
   assert.equal(first.warn.length, 0, '先挂上的那份不该被告状')
 })
 
@@ -219,9 +220,9 @@ test('one occupied route costs only that route, and the line names it', async ()
   await settle(() => copy.warn.length > 0, '第二份副本的启动对账行')
 
   assert.equal(copy.warn.length, 1)
-  assert.match(copy.warn[0], /1\/10/, '只丢了一条')
+  assert.match(copy.warn[0], /1\/11/, '只丢了一条')
   assert.match(copy.warn[0], /review\.current/, '丢的是哪条要指名')
-  assert.equal(runtime.routes.size, ROUTE_PATHS.length, '其余九条 + 旧的 current 都应在')
+  assert.equal(runtime.routes.size, ROUTE_PATHS.length, '其余十条 + 旧的 current 都应在')
 
   // 本副本自己的入口真的能应答：没有 surface 参数时是 400（走到了处理函数），
   // 不是 404（没注册）。
@@ -248,7 +249,7 @@ test('an occupant that cannot identify itself is still reported, not hidden', as
   assert.equal(copy.warn.length, 1)
   assert.match(copy.warn[0], /没有人报出身份/, '问不到身份要照实说')
   assert.match(copy.warn[0], new RegExp(escapeRegExp(OWN_VERSION)))
-  assert.match(copy.warn[0], /10\/10/)
+  assert.match(copy.warn[0], /11\/11/)
 })
 
 test('a runtime with no in-process identity probe still reports the collision', async () => {
@@ -260,7 +261,7 @@ test('a runtime with no in-process identity probe still reports the collision', 
 
   assert.equal(copy.warn.length, 1)
   assert.match(copy.warn[0], /没有进程内问身份的办法/)
-  assert.match(copy.warn[0], /10\/10/)
+  assert.match(copy.warn[0], /11\/11/)
 
   // 同样的旧运行时，只有一份副本时仍然安静。
   const quiet = mountCopy(fakeRuntime(), { probe: false })
@@ -311,5 +312,5 @@ test('a responder older than 0.3.1 answers without a host block; the line still 
   assert.match(line, /0\.3\.1/, '为什么算它旧：这个入口从 0.3.1 起才带 host')
   assert.match(line, new RegExp(escapeRegExp(OWN_VERSION)), '必须说出本副本的版本')
   assert.match(line, /比它新/)
-  assert.match(line, /10\/10/)
+  assert.match(line, /11\/11/)
 })

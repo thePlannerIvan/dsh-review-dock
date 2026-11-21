@@ -39,19 +39,40 @@
 | `GET /api/review.current?sessionId=<id>` | 获取本对话审阅面清单、`revision` / `changedSeq`、`pollMs` 与旧兼容字段 | 按 `sessionId` 隔离；拿不到 `sessionId` 时进入 10 秒待认领队列；每 2 秒顺带 `stat` 监视路径 |
 | `GET /api/review.surface?surface=<abs>` | 返回面元信息（`id` / `title` / `capabilities` / `wakeMode` / `host`） | `contract_version` 不为 `review-surface/2.0.0` 时在 `review_open` 返回 `warnings` |
 | `GET /api/review.page?surface=<abs>` | 输出注入桥后的入口 HTML | `v0.3.1` 要求裸或 script 包裹的 `{{REVIEW_BRIDGE}}` 注入点，缺之 409；`v0.3.2+` 自动追加在 `</body>` 前，`"annotate": true` 时同步内联 `annotate.js` |
-| `GET /api/review.bridge` | 获取当前选中公共桥源文件文本 | 供外部检查出典，内联注入前强制核验 `BRIDGE_API` 方法完整 |
+| `GET /api/review.bridge` | 获取当前选中公共桥源文件文本 | 供外部检查出典，内联注入前核验动作表派生出的「必须」清单；可选动作缺席只降级能力 |
+| `GET /api/review.actions` | 把「页面能请宿主做什么」那张表交给侧栏 | 唯一一张表（`lib/action-table.js`）：桥的完整性、侧栏转交、宿主入口注册都从它派生；页面本身不读它 |
 | `GET /api/review.asset?surface=<abs>&rel=<path>` | 流式读取 `surface.dir` 内单文件 | realpath 包含性校验防符号链接逃逸，拒绝越界 403 |
-| `GET/POST /api/review.draft` | 读回或原样写入未提交草稿（`GET` 为 `0.3.2+` 新增，支持页面刷新/重生成后恢复未提交改动） | 要求 surface 声明 `draft` 且路径不得与 `feedback` 相同（否则 409）；`realpathTarget()` 祖先解析防软链逃逸，原子写落盘 |
+| `GET/POST /api/review.draft` | 读回或原样写入未提交草稿（`GET` 支持页面刷新/重生成后恢复未提交改动） | 读与写都要求 `capabilities` 声明 `draft`（否则 403，并说清是哪一条没声明）；写还要求 surface 声明 `draft` 文件（否则 409）；路径经 `lib/paths.js` 围栏检查，原子写落盘；无草稿内容时读回 `{ draft: null }` |
 | `POST /api/review.write` | `{ surface, payload, sessionId }` 原样写回 `feedback` 文件 | 无信封、换行与格式与无插件宿主逐字节一致 |
 | `POST /api/review.command` | 可选命令通道 | 仅 surface 声明 `command` 能力时开放 |
 | `POST /api/review.wake` | `{ surface, unit, text, sessionId }` 提交唤醒消息 | 页面有传 `text` 时覆盖模板 `{unit}`；无 `sessionId` 直接 `ok: false` |
-| `POST /api/review.upload?surface=<abs>&rel=<path>` | 流式写盘原始二进制附件至 `dir` 相对路径 | 要求双方同时具备 `asset-upload` 能力（否则 403）；采用 `requestBody: 'streaming'` 边读边计数超 **16 MiB** 立刻 `cancel()` 回 413；目标已为软链或最近存在祖先落出 `dir` 均拒 403 |
+| `POST /api/review.upload?surface=<abs>&rel=<path>` | 流式写盘原始二进制附件至 `dir` 相对路径 | 要求 `asset-upload` 能力可用（否则 403，回执区分「没声明」与「宿主做不到」）；采用 `requestBody: 'streaming'` 边读边计数超 **16 MiB** 立刻 `cancel()` 回 413；目标已为软链或最近存在祖先落出 `dir` 均拒 403 |
 
 ### 3.1 `capabilities` 交集原则
 
-`init` 下发给页面的 `capabilities` 永远取 **「宿主实际已实现能力 ∩ surface 声明能力」**：宿主绝不向页面广告自己不支持的能力，防止界面亮起必然失败的按钮。对 `upload`、`draft` 路由在未声明能力的 surface 上直接调用一律返回 403。
+`init` 下发给页面的 `capabilities` 只由两件事决定：**宿主做得到什么**、**核心认不认可**。具体取
 
-### 3.2 `watch` 变化感知协议
+> 宿主实现 ∩ 当前这份桥提供的动作 ∩ surface 声明 ∩（`command` 另需 `planners-review-core` 的 `commandEnabled()` 认可）
+
+宿主绝不向页面广告自己不支持的能力，防止界面亮起必然失败的按钮。插件里**没有后端名单**（见 [ADR 0001](docs/adr/0001-host-knows-no-content.md)）：加一个后端只改核心，不改这里。这份结果在 `lib/index.js` 的 `capabilitiesOf()` 里算一次并缓存，三个读者读同一份：页面初始化（`/api/review.surface`）、`review_open` 的回执、每条入口的准入。
+
+入口准入与回执：
+
+- `upload`：`asset-upload` 不可用时 403；回执区分「surface 没声明」与「宿主当前做不到」。
+- `draft` 读与写：`draft` 不可用时 403，回执同样说清是哪一条没声明；写还要求 surface 声明 `draft` 文件（否则 409）。读在没有草稿内容时返回 `{ draft: null }`，与无插件宿主一致。
+- 桥缺少「必须」动作：页面拒绝加载，回执列出缺哪些；缺少可选动作（`draft` / `draftRead` / `command` / `upload`）只让对应能力不亮，页面照常打开，`review_open` 的 `warnings` 说明原因。
+
+### 3.2 动作声明表
+
+「页面能请宿主做什么」只有一张表：`lib/action-table.js`。每个动作一行，写明动作名、是否必须、撑起哪个能力、落到哪条宿主入口、用什么方法、请求体/查询带哪些字段、回执怎么翻译。三样东西从它派生，不再各写一份：
+
+1. 宿主入口的注册（`actionRoutes()` → `apply()`）；
+2. 桥的完整性清单（`requiredBridgeApi()` / `optionalBridgeApi()`）；
+3. 侧栏的转交（`servedActions()` → `GET /api/review.actions` → `lib/client.js` 的 `carry()`）。
+
+加一个动作只改表：漏了入口、漏了转交、漏了桥的清单，`test/action-table.test.mjs` 与 `test/relay.test.mjs` 会红。
+
+### 3.3 `watch` 变化感知协议
 
 `watch` 数组中路径以 **`review-surface.json` 文件所在目录** 为基准（不是 `surface.dir`）。任何越出 `dir` 的条目在 `review_open` 返回的 `warnings` 中明确告警（对应校验器报 `watch_outside_dir`）。宿主轮询只读 `mtime` 与 `size`，步进时向帧推送规范事件 `{ type: 'review/changed' }`（无 payload、不重载页面），避免打断用户输入。不用 SSE 以维持零无鉴权路由红线。
 
@@ -90,5 +111,5 @@ dsh web --dump-config | grep -A 2 review-dock
 - 实测环境记录（详情与边界见 [CHANGELOG.md](CHANGELOG.md)）：
   - **DSH `0.1.7-rc.2` / `0.2.0-rc.2` / `0.2.1-rc.1`**：隔离 `DSH_HOME` + Chromium 147 Playwright 全链路实测（桥连通、资产 blob URL、16 MiB/无能力 403、符号链真实路径、`read`/`readText`、`review/changed` 单次戳、安装与卸载对账）。
   - **DSH `0.2.2` + 桌面应用 `0.3.1`**：真机重启验证 system prompt 注入、`write`、`wake 200 queued`、重发 `409 duplicate`（真实 `state/events` 日志）与双面各自独立标签。
-  - **本地待发布测试基线（0.3.2–0.3.4 工作区）**：`npm test` 62 条单元测试（含 `entry-ownership`、`bridge-injection`、`submission-identity`、`conversation-binding`、`upload-limits`、`wake-verification` 等）。
+  - **本地测试基线（0.4.0 第一批）**：`npm test` 104 条检查（含 `action-table`、`relay`、`draft-read`、`capabilities`、`path-fence`、`browser-acceptance` 等）。真浏览器验收需要 Playwright 与 `planners-review-core`；缺任一项时该条显式 skip 并说明原因。
   - **尚未在真机/线上单独跑过的项**：`github:thePlannerIvan/dsh-review-dock` git 短地址直装、`.tgz` 安装包安装、多会话后台同时触发双对话真机演练、上传超限实时 413 与 `accepted-unverified` 运行时缺失真机演示。

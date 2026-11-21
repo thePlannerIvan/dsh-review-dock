@@ -51,7 +51,10 @@ const writeSurface = async (dir, data) => {
     dir: '.',
     entry: 'index.html',
     wake: { mode: 'steer', text: '{unit}' },
-    capabilities: [],
+    // Writing a draft now requires declaring the draft capability (the same
+    // promise the page made to get a draft at all); containment is what this
+    // file is about.
+    capabilities: ['draft'],
     ...data,
   }))
   return surface
