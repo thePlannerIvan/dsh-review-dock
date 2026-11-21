@@ -91,11 +91,25 @@
 
 ---
 
-## 5. 多标签与对话隔离行为（0.3.0 / 0.3.1）
+## 5. 多标签与对话隔离行为（0.3.0 / 0.3.1 / 0.4.0）
 
 - 标签声明 `multiple: true`，每个对话维护一个常驻轮询器，保留已显示过的 `revision`：手动关闭的标签不会在 2 秒轮询时自动弹回，只有 Agent 再次调 `review_open` 递增 `revision` 才重建。
 - **对话绑定**：优先调用所属对话标签自己的 `tab.actions.openTab`；仅当该面所属对话当前正在屏幕前激活时才允许走全局控制器展开右侧栏。若后台触发时无法安全放置则进入待放置队列，等切回该对话时渲染；误放入旧布局的错对话标签拒渲染审阅内容，只提示归属错误。
 - **同文件多面打开提醒（0.3.3）**：宿主以入口文件 `realpath` 记 30 分钟登记表，同一 HTML 被两个不同审阅面同时打开时在 `review_open` 返回 `warnings` 明说，避免静默覆盖。
+
+### 5.1 侧栏状态机（0.4.0 第二批）
+
+标签归属不再藏在 React 闭包里：`lib/client.js` 导出一个普通对象 `createPanel({ host })`，只暴露三个动作。它不碰 `window`、`document`、React，宿主（侧栏那层）把「屏幕上是哪个对话、布局里有哪些标签、哪些标签挂着」作为适配器交进来；界面只渲染、挂监听、把消息转进去。
+
+| 动作 | 入参 | 回执 |
+| --- | --- | --- |
+| `observe(sessionId, answer)` 看一次清单 | 一次 `GET /api/review.current` 的应答 | `{ placed, held, waiting, failed, poked, layout, pollMs }`：`waiting` 是「还没轮到」，`failed` 是「试过并失败」，原因同时留在 `problems()` |
+| `place({ sessionId, surface, revision })` 放一个标签 | 哪份面、哪个对话、第几版 | `{ status: 'opened', via: 'tab'\|'screen' }`、`{ status: 'already', mounted }`、`{ status: 'waiting', reason }`、`{ status: 'failed', reason }` |
+| `relay({ sessionId, surface, method, payload })` 转交一次请求 | 桥的一次调用 | `{ value, note? }`；拒绝时抛错，取不到动作表时点名「宿主没有提供动作表——可能是一份旧副本在应答」 |
+
+「这是哪个对话」只有一套推导（同一文件导出的 `conversationOf()` / `isMisfiled()`），界面层与状态机读同一个答案。人关掉标签不再由「标签数变少」一个信号独判：探针抛错 = 不知道，布局为空 = 真没有，挂载中的标签 = 它还在；只有「剩下的标签都认得出来」时，没挂载的放置记录才算过期。放置失败会留下原因，不会被当成「这个对话还没轮到」。
+
+行为检查在 `test/panel-placement.test.mjs`、`test/panel-render-state.test.mjs`、`test/panel-relay.test.mjs`、`test/client-registration.test.mjs`，真浏览器验收在 `test/browser/panel-conversations.browser.mjs`（A 开面、切到 B 看不见、切回 A 还在）。
 
 ---
 
@@ -111,5 +125,5 @@ dsh web --dump-config | grep -A 2 review-dock
 - 实测环境记录（详情与边界见 [CHANGELOG.md](CHANGELOG.md)）：
   - **DSH `0.1.7-rc.2` / `0.2.0-rc.2` / `0.2.1-rc.1`**：隔离 `DSH_HOME` + Chromium 147 Playwright 全链路实测（桥连通、资产 blob URL、16 MiB/无能力 403、符号链真实路径、`read`/`readText`、`review/changed` 单次戳、安装与卸载对账）。
   - **DSH `0.2.2` + 桌面应用 `0.3.1`**：真机重启验证 system prompt 注入、`write`、`wake 200 queued`、重发 `409 duplicate`（真实 `state/events` 日志）与双面各自独立标签。
-  - **本地测试基线（0.4.0 第一批）**：`npm test` 104 条检查（含 `action-table`、`relay`、`draft-read`、`capabilities`、`path-fence`、`browser-acceptance` 等）。真浏览器验收需要 Playwright 与 `planners-review-core`；缺任一项时该条显式 skip 并说明原因。
+  - **本地测试基线（0.4.0 第二批）**：`npm test` 114 条检查（含 `action-table`、`relay`、`draft-read`、`capabilities`、`path-fence`、`browser-acceptance` 等）。真浏览器验收需要 Playwright 与 `planners-review-core`；缺任一项时该条显式 skip 并说明原因。
   - **尚未在真机/线上单独跑过的项**：`github:thePlannerIvan/dsh-review-dock` git 短地址直装、`.tgz` 安装包安装、多会话后台同时触发双对话真机演练、上传超限实时 413 与 `accepted-unverified` 运行时缺失真机演示。
