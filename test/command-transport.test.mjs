@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { existsSync } from 'node:fs'
-import { rm } from 'node:fs/promises'
+import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import test from 'node:test'
@@ -20,6 +21,36 @@ const integrationTest = (name, fn) => test(name, { skip: !hasCoreFixture && 'req
 
 const request = (f, payload) => new Request('http://dsh.local/api/review.command', {
   method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ surface: f.surface, payload }),
+})
+
+/**
+ * 入口准入：没声明 `command` 的面，连核心都不该被问到。
+ *
+ * 这不是「核心会不会拒」的问题 —— 核心的 runner 只管后端认不认可，它不知道
+ * 这份面自己声明了什么。和草稿一样，声明的门在宿主这一侧。
+ */
+test('命令入口先过能力准入：没有声明 command 的面直接 403', async (t) => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'review-command-admission-')))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const surface = join(root, 'surface.json')
+  await writeFile(join(root, 'index.html'), '<!doctype html>\n{{REVIEW_BRIDGE}}\n')
+  await writeFile(surface, JSON.stringify({
+    contract_version: 'review-surface/2.0.0',
+    id: 'probe/command-admission',
+    title: 'Command admission',
+    dir: '.',
+    entry: 'index.html',
+    feedback: 'feedback.json',
+    wake: { mode: 'queue', text: '{unit}' },
+    capabilities: [],
+  }))
+  const response = await handleReviewCommand(new Request('http://dsh.local/api/review.command', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ surface, payload: { op: 'state' } }),
+  }), '')
+  assert.equal(response.status, 403, '没声明 command 能力的面不该走到 runner')
+  assert.match((await response.json()).error, /没有声明 command 能力/)
 })
 
 integrationTest('plugin exported command boundary uses the explicitly configured core runner for all operations', async (t) => {
@@ -77,7 +108,12 @@ integrationTest('plugin capability intersection and older/missing core are expli
   assert.deepEqual((await meta()).capabilities, ['command'])
   await f.setSurface({ command_backend: '/bin/sh' })
   assert.deepEqual((await meta()).capabilities, [])
-  assert.equal((await (await handleReviewCommand(request(f, { op: 'state' }), f.core)).json()).code, 'command_not_enabled')
+  // Admission reads the same answer as the page and the receipt: a backend Core
+  // will not run is refused at the door, before a runner ever gets asked.
+  const notAdmitted = await handleReviewCommand(request(f, { op: 'state' }), f.core)
+  assert.equal(notAdmitted.status, 403)
+  assert.equal((await notAdmitted.json()).code, 'command_not_admitted')
+  assert.equal((await f.calls()).length, 0, '被准入挡下时不该真的跑一次命令')
   await f.setSurface({ capabilities: [] })
   assert.deepEqual((await meta()).capabilities, [])
   const old = await commandFixture(t)
@@ -85,8 +121,9 @@ integrationTest('plugin capability intersection and older/missing core are expli
   // A fresh fixture has no import cache entry; an old core cannot be advertised.
   const oldMeta = await (await handleReviewSurface(new Request('http://dsh.local/api/review.surface?surface=' + encodeURIComponent(old.surface)), old.core)).json()
   assert.deepEqual(oldMeta.surface.capabilities, [])
-  assert.equal((await (await handleReviewCommand(request(old, { op: 'state' }), old.core)).json()).code, 'command_runner_missing')
-  assert.equal((await (await handleReviewCommand(request(f, { op: 'state' }), join(f.base, 'missing-core'))).json()).code, 'command_runner_missing')
+  // 没有 runner = 这个能力此刻不成立：入口同样在门口拒绝，而不是先 200 再报错。
+  assert.equal((await handleReviewCommand(request(old, { op: 'state' }), old.core)).status, 403)
+  assert.equal((await handleReviewCommand(request(f, { op: 'state' }), join(f.base, 'missing-core'))).status, 403)
 })
 
 integrationTest('plugin validates method, content-type and malformed requests', async (t) => {
