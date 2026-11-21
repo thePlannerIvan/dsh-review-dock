@@ -231,6 +231,29 @@ test('空标签认领了较早的一份面之后，后来交接的仍能开出�
   assert.equal(fake.opened[0].options.params.surface, B)
 })
 
+test('「放一个标签」这个动作自己也说得清结果', () => {
+  const fake = createFakeHost({ onScreen: 'conversation-A' })
+  const panel = panelFor(fake)
+
+  assert.deepEqual(
+    panel.place({ sessionId: 'conversation-A', surface: A, revision: 1 }),
+    { status: 'opened', via: 'screen' },
+  )
+  assert.deepEqual(
+    panel.place({ sessionId: 'conversation-A', surface: A, revision: 1 }),
+    { status: 'already', mounted: false },
+    '同一份面再放一次是 already，不是第二个标签',
+  )
+
+  fake.show('conversation-B')
+  assert.deepEqual(
+    panel.place({ sessionId: 'conversation-A', surface: B, revision: 1 }),
+    { status: 'waiting', reason: 'not-on-screen' },
+    '放不进去时返回 waiting 与原因，而不是一个无法区分的 false',
+  )
+  assert.equal(fake.opened.length, 1)
+})
+
 test('宿主没有标签清单入口时，布局是「不知道」，不是 0', () => {
   const panel = createPanel({ host: { onScreen: () => 'conversation-A' } })
   const receipt = panel.observe('conversation-A', answer([]))
